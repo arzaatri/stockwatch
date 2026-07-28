@@ -1,0 +1,32 @@
+"""Polls slow-changing metadata (sector, index membership, ratings, splits,
+earnings, news) at a coarser interval than the real-time price stream, which
+runs separately via streaming/quote_producer.py + flink_job.py. No scheduler
+framework - a plain while+sleep loop; `run_once` also backs cron-style
+invocation via the CLI, so one code path serves both usages.
+"""
+
+import time
+
+from stockwatch.ingestion.classification import ingest_classification
+from stockwatch.ingestion.earnings_calendar import ingest_earnings_estimate
+from stockwatch.ingestion.index_membership import ingest_index_membership
+from stockwatch.ingestion.news import ingest_news
+from stockwatch.ingestion.ratings import ingest_rating_consensus
+from stockwatch.ingestion.splits import ingest_splits
+from stockwatch.universe.watchlist import get_active_tickers
+
+
+def run_once() -> None:
+    for ticker in get_active_tickers():
+        ingest_classification(ticker)
+        ingest_index_membership(ticker)
+        ingest_rating_consensus(ticker)
+        ingest_splits(ticker)
+        ingest_earnings_estimate(ticker)
+        ingest_news(ticker)
+
+
+def run_forever(interval_seconds: int) -> None:
+    while True:
+        run_once()
+        time.sleep(interval_seconds)
