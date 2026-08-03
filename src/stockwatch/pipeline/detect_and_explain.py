@@ -1,16 +1,12 @@
-"""Orchestrates the "explain" half of a run: build features -> fit/score
-IsolationForest -> SHAP -> LangGraph LLM explanation, for each currently
-flagged anomaly. `pipeline/poll_loop.py` handles the "ingest" half.
+"""Orchestrates the "explain" half of a run: build features -> detect
+anomalies (MLAnomalyDetector) -> SHAP -> LangGraph LLM explanation, for each
+currently flagged anomaly. `pipeline/poll_loop.py` handles the "ingest" half.
 """
 
 from typing import Any
 
-from stockwatch.detection.isolation_forest import (
-    fit_isolation_forest,
-    get_anomalies,
-    score_anomalies,
-    to_feature_array,
-)
+from stockwatch.detection.isolation_forest import to_feature_array
+from stockwatch.detection.ml_detector import MLAnomalyDetector
 from stockwatch.explain.shap_explainer import get_explainer, top_features_for_anomaly
 from stockwatch.features.build_features import build_feature_matrix
 from stockwatch.ingestion.news import get_recent_news
@@ -32,15 +28,14 @@ def detect_and_explain_anomalies(
     if feature_matrix.height < MIN_ROWS_TO_FIT:
         return []
 
-    model = fit_isolation_forest(feature_matrix)
-    scored = score_anomalies(model, feature_matrix)
-    anomalies = get_anomalies(scored)
+    detector = MLAnomalyDetector()
+    anomalies = detector.detect(feature_matrix)
     if anomalies.is_empty():
         return []
 
     background = to_feature_array(feature_matrix)
     anomaly_features = to_feature_array(anomalies)
-    explainer = get_explainer(model, background)
+    explainer = get_explainer(detector.model, background)
     graph = build_default_graph()
 
     results = []
