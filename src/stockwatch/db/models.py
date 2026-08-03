@@ -57,13 +57,15 @@ class RawSplit(Base):
 
 class RawNews(Base):
     __tablename__ = "raw_news"
-    __table_args__ = (UniqueConstraint("ticker", "link"),)
+    __table_args__ = (UniqueConstraint("scope", "scope_key", "link"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ticker: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str] = mapped_column(Text)
+    scope_key: Mapped[str] = mapped_column(Text)
     headline: Mapped[str] = mapped_column(Text)
     link: Mapped[str] = mapped_column(Text)
     publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

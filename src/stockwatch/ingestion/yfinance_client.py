@@ -6,9 +6,12 @@ plain fixtures instead of mocking yfinance's internals).
 """
 
 from datetime import UTC, datetime
+from typing import Literal
 
 import yfinance as yf
 from pydantic import BaseModel
+
+NewsScope = Literal["company", "sector", "industry"]
 
 
 class Quote(BaseModel):
@@ -51,10 +54,12 @@ class EarningsEstimate(BaseModel):
 
 
 class NewsItem(BaseModel):
-    ticker: str
+    scope: NewsScope
+    scope_key: str
     headline: str
     link: str
     publisher: str | None
+    snippet: str | None = None
     published_at: datetime | None
 
 
@@ -178,7 +183,8 @@ def get_news(ticker: str, count: int = 10) -> list[NewsItem]:
             continue
         news_items.append(
             NewsItem(
-                ticker=ticker,
+                scope="company",
+                scope_key=ticker,
                 headline=title,
                 link=link,
                 publisher=provider.get("displayName"),

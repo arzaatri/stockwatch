@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
 
+    newsapi_api_key: str = ""
+
     @property
     def postgres_dsn(self) -> str:
         return (

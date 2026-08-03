@@ -42,15 +42,17 @@ CREATE TABLE raw_splits (
 
 CREATE TABLE raw_news (
     id           BIGSERIAL PRIMARY KEY,
-    ticker       TEXT NOT NULL,
+    scope        TEXT NOT NULL,   -- 'company' | 'sector' | 'industry'
+    scope_key    TEXT NOT NULL,   -- ticker, sector name, or industry name
     headline     TEXT NOT NULL,
     link         TEXT NOT NULL,
     publisher    TEXT,
+    snippet      TEXT,
     published_at TIMESTAMPTZ,
     ingested_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (ticker, link)
+    UNIQUE (scope, scope_key, link)
 );
-CREATE INDEX ix_raw_news_ticker_published_at ON raw_news (ticker, published_at);
+CREATE INDEX ix_raw_news_scope_key_published_at ON raw_news (scope, scope_key, published_at);
 
 CREATE TABLE raw_index_snapshot (
     id          BIGSERIAL PRIMARY KEY,

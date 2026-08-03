@@ -17,7 +17,9 @@ def prepare_prompt(state: GraphState) -> dict:
     )
     news_text = (
         "\n".join(
-            f"- {item.headline} ({item.publisher})" for item in context.recent_news
+            f"- [{item.scope}] {item.headline} ({item.publisher})"
+            + (f": {item.snippet}" if item.snippet else "")
+            for item in context.recent_news
         )
         or "None available."
     )
@@ -40,11 +42,14 @@ The features that contributed most to this anomaly (via SHAP):
 
 Current analyst rating consensus: {rating_text}
 
-Recent news:
+Recent news (tagged by scope - [company] is {context.ticker}-specific, [sector]/[industry] \
+are broader market context, not necessarily about {context.ticker} directly):
 {news_text}
 
 Explain the most likely real-world cause(s) of this anomaly, using only the context \
-given. Be concise and specific about which signals support your reasoning."""
+given. Weigh company-scoped news more heavily than sector/industry news unless the \
+evidence points to a sector- or industry-wide move. Be concise and specific about which \
+signals support your reasoning."""
 
     return {"prompt": prompt}
 

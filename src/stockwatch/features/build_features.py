@@ -194,9 +194,13 @@ def _load_news_counts(
 ) -> pl.DataFrame:
     cutoff = now - timedelta(days=NEWS_LOOKBACK_DAYS)
     rows = session.execute(
-        select(RawNews.ticker, func.count(RawNews.id))
-        .where(RawNews.ticker.in_(tickers), RawNews.published_at >= cutoff)
-        .group_by(RawNews.ticker)
+        select(RawNews.scope_key, func.count(RawNews.id))
+        .where(
+            RawNews.scope == "company",
+            RawNews.scope_key.in_(tickers),
+            RawNews.published_at >= cutoff,
+        )
+        .group_by(RawNews.scope_key)
     ).all()
     counts = dict(rows)
     return pl.DataFrame(

@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
 
 from stockwatch.explain.shap_explainer import FeatureAttribution
+from stockwatch.ingestion.yfinance_client import NewsItem
 from stockwatch.llm.nodes import call_llm, prepare_prompt
 from stockwatch.llm.schemas import AnomalyContext, ExplanationOutput, GraphState
 
 
-def _context() -> AnomalyContext:
+def _context(recent_news: list[NewsItem] | None = None) -> AnomalyContext:
     return AnomalyContext(
         ticker="AAPL",
         as_of=datetime.now(UTC),
@@ -15,6 +16,7 @@ def _context() -> AnomalyContext:
         ],
         sector="Technology",
         industry="Consumer Electronics",
+        recent_news=recent_news or [],
     )
 
 
@@ -30,6 +32,45 @@ def test_prepare_prompt_handles_missing_rating_and_news() -> None:
 
     assert "No rating data available." in update["prompt"]
     assert "None available." in update["prompt"]
+
+
+def test_prepare_prompt_tags_news_by_scope_and_includes_snippet() -> None:
+    news = [
+        NewsItem(
+            scope="company",
+            scope_key="AAPL",
+            headline="Apple beats earnings",
+            link="https://example.com/company",
+            publisher="Example Wire",
+            snippet="A strong quarter.",
+            published_at=datetime.now(UTC),
+        ),
+        NewsItem(
+            scope="sector",
+            scope_key="Technology",
+            headline="Tech sector rallies",
+            link="https://example.com/sector",
+            publisher="Example Wire",
+            snippet=None,
+            published_at=datetime.now(UTC),
+        ),
+        NewsItem(
+            scope="industry",
+            scope_key="Consumer Electronics",
+            headline="Chip shortage eases",
+            link="https://example.com/industry",
+            publisher="Example Wire",
+            published_at=datetime.now(UTC),
+        ),
+    ]
+
+    update = prepare_prompt(GraphState(context=_context(recent_news=news)))
+    prompt = update["prompt"]
+
+    assert "[company] Apple beats earnings" in prompt
+    assert "A strong quarter." in prompt
+    assert "[sector] Tech sector rallies" in prompt
+    assert "[industry] Chip shortage eases" in prompt
 
 
 class _FakeStructuredLLM:
