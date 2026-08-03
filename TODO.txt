@@ -1,0 +1,4 @@
+- Create a switch for me to control the granularity of data, e.g. stock data in X second intervals. Set it to 10 minutes for now
+- So that I don't have run this all the time, give it way to backfill stock data and metadata at my chosen granularity
+- Create a dashboard that shows stock values over time with anomalies marked with a point
+    - Clicking on it triggers an LLM call, supplied with point-in-time metadata

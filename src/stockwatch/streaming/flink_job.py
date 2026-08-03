@@ -34,7 +34,11 @@ from pyflink.datastream.state import ValueStateDescriptor
 from pyflink.datastream.window import TimeWindow, TumblingEventTimeWindows
 
 from stockwatch.config import get_settings
-from stockwatch.streaming.rolling_stats import TickerRunningStats, update_running_stats
+from stockwatch.streaming.rolling_stats import (
+    WINDOW_SECONDS,
+    TickerRunningStats,
+    update_running_stats,
+)
 
 QUOTES_TOPIC = "quotes"
 STATS_TOPIC = "price_stats"
@@ -128,7 +132,7 @@ def build_job(env: StreamExecutionEnvironment, bootstrap_servers: str) -> Any:
 
     stats = (
         quotes.key_by(_extract_ticker, key_type=Types.STRING())
-        .window(TumblingEventTimeWindows.of(Time.minutes(1)))
+        .window(TumblingEventTimeWindows.of(Time.seconds(WINDOW_SECONDS)))
         .process(RollingStatsProcessFunction(), output_type=Types.STRING())
     )
     stats.sink_to(build_kafka_sink(bootstrap_servers))

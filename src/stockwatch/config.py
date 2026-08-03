@@ -16,8 +16,8 @@ class Settings(BaseSettings):
 
     kafka_bootstrap_servers: str = "localhost:19092"
 
-    price_poll_interval_seconds: int = 10
-    slow_dim_poll_interval_seconds: int = 3600
+    price_poll_interval_seconds: int = 600
+    slow_dim_poll_interval_seconds: int = 86400
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"

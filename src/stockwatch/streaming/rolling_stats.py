@@ -9,6 +9,10 @@ updated one window-average at a time without keeping the full history around.
 
 from pydantic import BaseModel
 
+WINDOW_SECONDS = 60  # tumbling window size, shared by flink_job.py (live) and
+# pipeline/backfill.py (batch replay), so both populate windowed_price_stats
+# at the same granularity.
+
 
 class TickerRunningStats(BaseModel):
     count: int = 0

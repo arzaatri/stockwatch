@@ -7,6 +7,7 @@ import sys
 import click
 
 from stockwatch.config import get_settings
+from stockwatch.pipeline.backfill import backfill_prices
 from stockwatch.pipeline.detect_and_explain import detect_and_explain_anomalies
 from stockwatch.pipeline.poll_loop import run_forever as run_poll_forever
 from stockwatch.pipeline.poll_loop import run_once as run_poll_once
@@ -66,6 +67,30 @@ def run_once_command() -> None:
 def poll(interval: int | None) -> None:
     settings = get_settings()
     run_poll_forever(interval or settings.slow_dim_poll_interval_seconds)
+
+
+@cli.command()
+@click.option(
+    "--period",
+    default="7d",
+    help="How far back to backfill prices (yfinance period string, e.g. '7d', '60d').",
+)
+@click.option("--prices/--no-prices", default=True, help="Backfill historical prices.")
+@click.option(
+    "--metadata/--no-metadata",
+    default=True,
+    help="Backfill metadata (sector, ratings, splits, earnings, news).",
+)
+def backfill(period: str, prices: bool, metadata: bool) -> None:
+    """Populate history in one shot, so you don't need quote_producer/flink_job/
+    poll_loop running continuously just to accumulate enough data to detect on.
+    """
+    if prices:
+        tick_count = backfill_prices(period=period)
+        click.echo(f"Backfilled {tick_count} price ticks (period={period}).")
+    if metadata:
+        run_poll_once()
+        click.echo("Backfilled metadata for active tickers.")
 
 
 @cli.command()
