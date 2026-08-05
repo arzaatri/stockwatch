@@ -13,8 +13,11 @@ from kafka import KafkaProducer
 from stockwatch.config import get_settings
 from stockwatch.ingestion.prices import append_price_tick
 from stockwatch.ingestion.yfinance_client import Quote, get_quote
+from stockwatch.logging_utils import get_logger
 from stockwatch.streaming.flink_job import QUOTES_TOPIC
 from stockwatch.universe.watchlist import get_active_tickers
+
+logger = get_logger(__name__)
 
 MAX_FETCH_WORKERS = 10
 
@@ -55,9 +58,11 @@ def run_once(producer: KafkaProducer) -> None:
         for future in futures:
             future.result()
     producer.flush()
+    logger.info("Polled and published quotes for %d ticker(s)", len(tickers))
 
 
 def run_forever(interval_seconds: int) -> None:
+    logger.info("Starting quote producer, interval=%ds", interval_seconds)
     producer = build_producer(get_settings().kafka_bootstrap_servers)
     while True:
         run_once(producer)

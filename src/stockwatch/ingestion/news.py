@@ -18,6 +18,9 @@ from stockwatch.db.models import RawNews
 from stockwatch.ingestion import news_api_client
 from stockwatch.ingestion.news_source import NewsSource, YFinanceNewsSource
 from stockwatch.ingestion.yfinance_client import NewsItem, NewsScope
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def ingest_news(
@@ -98,3 +101,6 @@ def _store_news_items(items: list[NewsItem]) -> None:
                 .on_conflict_do_nothing(index_elements=["scope", "scope_key", "link"])
             )
             session.execute(stmt)
+
+    scope, scope_key = items[0].scope, items[0].scope_key
+    logger.info("Considered %d article(s) for %s/%s", len(items), scope, scope_key)

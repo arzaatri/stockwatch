@@ -12,6 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from stockwatch.db.models import Base
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def scd2_upsert(
@@ -41,6 +44,7 @@ def scd2_upsert(
                 is_current=True,
             )
         )
+        logger.info("%s: first version for %s", model.__tablename__, natural_key)
         return
 
     if _attributes_unchanged(current, attributes):
@@ -57,6 +61,7 @@ def scd2_upsert(
             is_current=True,
         )
     )
+    logger.info("%s: new version for %s", model.__tablename__, natural_key)
 
 
 def scd2_as_of(

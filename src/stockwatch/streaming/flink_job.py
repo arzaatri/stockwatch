@@ -34,11 +34,14 @@ from pyflink.datastream.state import ValueStateDescriptor
 from pyflink.datastream.window import TimeWindow, TumblingEventTimeWindows
 
 from stockwatch.config import get_settings
+from stockwatch.logging_utils import get_logger
 from stockwatch.streaming.rolling_stats import (
     WINDOW_SECONDS,
     TickerRunningStats,
     update_running_stats,
 )
+
+logger = get_logger(__name__)
 
 QUOTES_TOPIC = "quotes"
 STATS_TOPIC = "price_stats"
@@ -154,6 +157,7 @@ def main() -> None:
     stats = build_job(env, settings.kafka_bootstrap_servers)
     stats.print()  # visible confirmation the job is producing windowed stats
 
+    logger.info("Starting Flink windowing job (window=%ds)", WINDOW_SECONDS)
     env.execute("stockwatch-price-windowing")
 
 

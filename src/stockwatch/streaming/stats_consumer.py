@@ -13,7 +13,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from stockwatch.config import get_settings
 from stockwatch.db.engine import session_scope
 from stockwatch.db.models import WindowedPriceStats
+from stockwatch.logging_utils import get_logger
 from stockwatch.streaming.flink_job import STATS_TOPIC
+
+logger = get_logger(__name__)
 
 
 def build_consumer(bootstrap_servers: str) -> KafkaConsumer:
@@ -47,6 +50,7 @@ def persist_stats_record(record: dict[str, Any]) -> None:
 
 
 def run_forever() -> None:
+    logger.info("Starting stats consumer on topic %r", STATS_TOPIC)
     consumer = build_consumer(get_settings().kafka_bootstrap_servers)
     for message in consumer:
         persist_stats_record(message.value)

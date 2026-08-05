@@ -6,6 +6,9 @@ itself, which is what lets graph.py swap in a fake Runnable for tests.
 from langchain_core.runnables import Runnable
 
 from stockwatch.llm.schemas import ExplanationOutput, GraphState
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def prepare_prompt(state: GraphState) -> dict:
@@ -55,6 +58,13 @@ signals support your reasoning."""
 
 
 def call_llm(state: GraphState, llm: Runnable) -> dict:
+    logger.info("Calling LLM for %s @ %s", state.context.ticker, state.context.as_of)
     structured_llm = llm.with_structured_output(ExplanationOutput)
-    explanation = structured_llm.invoke(state.prompt)
+    try:
+        explanation = structured_llm.invoke(state.prompt)
+    except Exception:
+        logger.exception(
+            "LLM call failed for %s @ %s", state.context.ticker, state.context.as_of
+        )
+        raise
     return {"explanation": explanation}

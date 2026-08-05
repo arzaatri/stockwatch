@@ -15,3 +15,6 @@ wheels/
 # Downloaded connector jars (large binaries, fetched on demand)
 jars/
 
+# Log files
+logs/
+

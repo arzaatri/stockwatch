@@ -8,12 +8,15 @@ from pathlib import Path
 import click
 
 from stockwatch.config import get_settings
+from stockwatch.logging_utils import get_logger
 from stockwatch.pipeline.backfill import backfill_prices
 from stockwatch.pipeline.detect_and_explain import detect_and_explain_anomalies
 from stockwatch.pipeline.poll_loop import run_forever as run_poll_forever
 from stockwatch.pipeline.poll_loop import run_once as run_poll_once
 from stockwatch.universe.index_constituents import fetch_index_table
 from stockwatch.universe.watchlist import add_ticker, watchlist_count
+
+logger = get_logger(__name__)
 
 STREAM_MODULES = [
     "stockwatch.streaming.quote_producer",
@@ -31,6 +34,7 @@ def cli() -> None:
 @cli.command()
 @click.option("--n", default=20, help="Number of tickers to seed from the S&P 500.")
 def seed(n: int) -> None:
+    logger.info("stockwatch seed --n %d", n)
     constituents = fetch_index_table("sp500")["ticker"].to_list()
     sampled = random.sample(constituents, min(n, len(constituents)))
     for ticker in sampled:
@@ -45,6 +49,7 @@ def watchlist_count_command() -> None:
 
 @cli.command(name="run-once")
 def run_once_command() -> None:
+    logger.info("stockwatch run-once")
     run_poll_once()
     results = detect_and_explain_anomalies()
     if not results:
@@ -68,7 +73,9 @@ def run_once_command() -> None:
 )
 def poll(interval: int | None) -> None:
     settings = get_settings()
-    run_poll_forever(interval or settings.slow_dim_poll_interval_seconds)
+    resolved_interval = interval or settings.slow_dim_poll_interval_seconds
+    logger.info("stockwatch poll --interval %d", resolved_interval)
+    run_poll_forever(resolved_interval)
 
 
 @cli.command()
@@ -90,6 +97,12 @@ def backfill(max_lookback_days: int, prices: bool, metadata: bool) -> None:
     poll_loop running continuously just to accumulate enough data to detect on.
     Cheap to run on every startup - already-current tickers fetch almost nothing.
     """
+    logger.info(
+        "stockwatch backfill --max-lookback-days %d --prices %s --metadata %s",
+        max_lookback_days,
+        prices,
+        metadata,
+    )
     if prices:
         tick_count = backfill_prices(max_lookback_days=max_lookback_days)
         click.echo(f"Backfilled {tick_count} price ticks (max {max_lookback_days}d).")
@@ -101,6 +114,7 @@ def backfill(max_lookback_days: int, prices: bool, metadata: bool) -> None:
 @cli.command()
 def stream() -> None:
     """Launch the real-time price path: producer + PyFlink job + stats consumer."""
+    logger.info("stockwatch stream: launching %s", ", ".join(STREAM_MODULES))
     processes = [
         subprocess.Popen([sys.executable, "-m", module]) for module in STREAM_MODULES
     ]
@@ -115,6 +129,7 @@ def stream() -> None:
 @cli.command()
 def dashboard() -> None:
     """Launch the Streamlit anomaly dashboard."""
+    logger.info("stockwatch dashboard: launching %s", DASHBOARD_APP_PATH)
     subprocess.run(
         [sys.executable, "-m", "streamlit", "run", str(DASHBOARD_APP_PATH)], check=True
     )

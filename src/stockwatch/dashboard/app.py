@@ -16,8 +16,11 @@ from stockwatch.detection.base import AnomalyDetector
 from stockwatch.detection.ml_detector import MLAnomalyDetector
 from stockwatch.detection.simple_detector import SimpleAnomalyDetector
 from stockwatch.features.build_features import build_feature_matrix
+from stockwatch.logging_utils import get_logger
 from stockwatch.pipeline.explain_anomaly import explain_anomaly_at
 from stockwatch.universe.watchlist import get_active_tickers
+
+logger = get_logger(__name__)
 
 LOOKBACK_OPTIONS: dict[str, timedelta | None] = {
     "1 day": timedelta(days=1),
@@ -97,12 +100,13 @@ def _build_chart(ticker: str, ticker_rows: pl.DataFrame) -> go.Figure:
 
 def _render_explanation(ticker: str, window_end: datetime) -> None:
     st.subheader(f"Explanation: {ticker} @ {window_end.isoformat()}")
+    logger.info("Anomaly point clicked: %s @ %s", ticker, window_end)
     with st.spinner("Asking the LLM..."):
         try:
             result = _cached_explanation(ticker, window_end)
-        except (
-            Exception
-        ) as error:  # surface any failure in the UI rather than crashing the app
+        except Exception as error:
+            # surface any failure in the UI rather than crashing the app
+            logger.exception("Explanation failed for %s @ %s", ticker, window_end)
             st.error(f"Explanation failed: {error}")
             return
 
@@ -152,6 +156,12 @@ def main() -> None:
         st.info("Select at least one ticker.")
         return
 
+    logger.info(
+        "Loading dashboard for %s (lookback=%s, detector=%s)",
+        selected,
+        lookback_label,
+        detector_label,
+    )
     scored = _load_scored_matrix(tuple(selected), lookback_label, detector_label)
     if scored.is_empty():
         st.warning("No price history yet for the selected tickers/lookback.")

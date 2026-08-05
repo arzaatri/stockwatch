@@ -24,6 +24,9 @@ from stockwatch.ingestion.ratings import get_rating_consensus_as_of
 from stockwatch.ingestion.yfinance_client import NewsItem
 from stockwatch.llm.graph import build_default_graph
 from stockwatch.llm.schemas import AnomalyContext, GraphState
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 NEWS_LOOKBACK = timedelta(hours=24)
 
@@ -43,6 +46,7 @@ def explain_anomaly(
     model and building the SHAP explainer, since that's shared setup across
     potentially many anomalies in one run.
     """
+    logger.info("Explaining %s @ %s (score=%.4f)", ticker, window_end, anomaly_score)
     top_features = top_features_for_anomaly(explainer, feature_row, k=top_k_features)
     sector_industry = get_sector_industry_as_of(ticker, window_end)
     rating = get_rating_consensus_as_of(ticker, window_end)
@@ -65,6 +69,7 @@ def explain_anomaly(
     )
     graph = build_default_graph()
     result_state = graph.invoke(GraphState(context=context))
+    logger.info("Explanation ready for %s @ %s", ticker, window_end)
     return {"context": context, "explanation": result_state["explanation"]}
 
 
@@ -88,6 +93,7 @@ def explain_anomaly_at(
         (pl.col("ticker") == ticker) & (pl.col("window_end") == window_end)
     )
     if matching.is_empty():
+        logger.warning("No feature row found for %s at %s", ticker, window_end)
         raise ValueError(f"No feature row found for {ticker} at {window_end}")
 
     background = to_feature_array(feature_matrix)

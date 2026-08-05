@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from stockwatch.config import get_settings
 from stockwatch.ingestion.prices import append_price_tick, get_latest_tick_at
 from stockwatch.ingestion.yfinance_client import Quote, get_price_history
+from stockwatch.logging_utils import get_logger
 from stockwatch.streaming.rolling_stats import (
     WINDOW_SECONDS,
     TickerRunningStats,
@@ -19,6 +20,8 @@ from stockwatch.streaming.rolling_stats import (
 )
 from stockwatch.streaming.stats_consumer import persist_stats_record
 from stockwatch.universe.watchlist import get_active_tickers
+
+logger = get_logger(__name__)
 
 # yfinance only accepts these interval strings, not arbitrary second counts.
 _VALID_YF_INTERVALS_SECONDS: dict[int, str] = {
@@ -58,18 +61,27 @@ def backfill_prices(
     now = datetime.now(UTC)
     earliest_start = now - timedelta(days=max_lookback_days)
 
+    logger.info(
+        "Starting price backfill for %d ticker(s), interval=%s, max_lookback_days=%d",
+        len(tickers),
+        interval,
+        max_lookback_days,
+    )
     tick_count = 0
     for ticker in tickers:
         last_tick_at = get_latest_tick_at(ticker)
         start = max(earliest_start, last_tick_at) if last_tick_at else earliest_start
         if start >= now:
-            continue  # already caught up
+            logger.info("%s already caught up, skipping", ticker)
+            continue
 
         quotes = get_price_history(ticker, start=start, end=now, interval=interval)
         for quote in quotes:
             append_price_tick(quote)
         _replay_windowed_stats(ticker, quotes)
+        logger.info("%s: backfilled %d tick(s) since %s", ticker, len(quotes), start)
         tick_count += len(quotes)
+    logger.info("Price backfill complete: %d tick(s) written", tick_count)
     return tick_count
 
 

@@ -15,6 +15,9 @@ from sqlalchemy import func, select
 
 from stockwatch.db.engine import session_scope
 from stockwatch.db.models import RawIndexSnapshot
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 IndexName = Literal["sp500", "nasdaq100", "dow"]
 
@@ -36,10 +39,15 @@ def fetch_index_table(
     with session_scope() as session:
         cached = _get_cached_snapshot(session, index_name, max_age)
         if cached is not None:
+            logger.info(
+                "Using cached %s constituents (%d tickers)", index_name, cached.height
+            )
             return cached
 
+        logger.info("Scraping fresh %s constituents from Wikipedia", index_name)
         tickers = _scrape_index_constituents(index_name)
         _store_snapshot(session, index_name, tickers)
+        logger.info("Fetched %d %s constituents", len(tickers), index_name)
         return pl.DataFrame({"ticker": tickers})
 
 

@@ -30,7 +30,7 @@ def search_news(query: str, scope: NewsScope, count: int = 10) -> list[NewsItem]
     """
     api_key = get_settings().newsapi_api_key
     if not api_key:
-        logger.warning("search_news: NEWSAPI_API_KEY not set, skipping")
+        logger.warning("NEWSAPI_API_KEY not set, skipping query=%r", query)
         return []
 
     try:
@@ -47,7 +47,7 @@ def search_news(query: str, scope: NewsScope, count: int = 10) -> list[NewsItem]
         )
         response.raise_for_status()
     except requests.RequestException as error:
-        logger.warning("search_news: request failed for query=%r: %s", query, error)
+        logger.warning("Request failed for query=%r: %s", query, error)
         return []
 
     articles = response.json().get("articles", [])
@@ -69,6 +69,7 @@ def search_news(query: str, scope: NewsScope, count: int = 10) -> list[NewsItem]
                 published_at=_parse_published_at(article.get("publishedAt")),
             )
         )
+    logger.info("Fetched %d article(s) for query=%r", len(news_items), query)
     return news_items
 
 

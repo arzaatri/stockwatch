@@ -8,6 +8,9 @@ from sqlalchemy import select
 
 from stockwatch.db.engine import session_scope
 from stockwatch.db.models import Watchlist
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_active_tickers() -> list[str]:
@@ -27,8 +30,10 @@ def add_ticker(ticker: str) -> None:
             session.add(
                 Watchlist(ticker=ticker, added_at=datetime.now(UTC), is_active=True)
             )
+            logger.info("Added %s to the watchlist", ticker)
         else:
             existing.is_active = True
+            logger.info("Reactivated %s on the watchlist", ticker)
 
 
 def deactivate_ticker(ticker: str) -> None:
@@ -36,3 +41,4 @@ def deactivate_ticker(ticker: str) -> None:
         existing = session.get(Watchlist, ticker)
         if existing is not None:
             existing.is_active = False
+            logger.info("Deactivated %s on the watchlist", ticker)

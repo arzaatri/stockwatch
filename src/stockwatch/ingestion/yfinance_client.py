@@ -11,6 +11,10 @@ from typing import Literal
 import yfinance as yf
 from pydantic import BaseModel
 
+from stockwatch.logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 NewsScope = Literal["company", "sector", "industry"]
 
 
@@ -69,6 +73,7 @@ def get_quote(ticker: str) -> Quote | None:
     """
     history = yf.Ticker(ticker).history(period="1d", interval="1m")
     if history.empty:
+        logger.info("No intraday bar available for %s (market closed?)", ticker)
         return None
     last = history.iloc[-1]
     return Quote(
@@ -92,6 +97,7 @@ def get_price_history(
     """
     history = yf.Ticker(ticker).history(start=start, end=end, interval=interval)
     if history.empty:
+        logger.info("No price history for %s between %s and %s", ticker, start, end)
         return []
     return [
         Quote(
@@ -117,6 +123,7 @@ def get_sector_industry(ticker: str) -> SectorIndustry | None:
     sector = info.get("sector")
     industry = info.get("industry")
     if not sector or not industry:
+        logger.info("Sector/industry missing for %s this cycle", ticker)
         return None
     return SectorIndustry(ticker=ticker, sector=sector, industry=industry)
 
@@ -124,6 +131,7 @@ def get_sector_industry(ticker: str) -> SectorIndustry | None:
 def get_rating_consensus(ticker: str) -> RatingConsensus | None:
     summary = yf.Ticker(ticker).get_recommendations_summary()
     if summary is None or summary.empty:
+        logger.info("No rating consensus available for %s", ticker)
         return None
     current = summary[summary["period"] == "0m"]
     if current.empty:
@@ -155,10 +163,12 @@ def get_earnings_estimate(ticker: str) -> EarningsEstimate | None:
     """
     earnings_dates = yf.Ticker(ticker).get_earnings_dates(limit=12)
     if earnings_dates is None or earnings_dates.empty:
+        logger.info("No earnings dates available for %s", ticker)
         return None
     now = datetime.now(UTC)
     upcoming = earnings_dates[earnings_dates.index.to_pydatetime() > now]
     if upcoming.empty:
+        logger.info("No upcoming earnings date for %s", ticker)
         return None
     next_date = upcoming.index.min()
     row = upcoming.loc[next_date]

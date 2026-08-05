@@ -10,7 +10,10 @@ from stockwatch.detection.isolation_forest import to_feature_array
 from stockwatch.detection.ml_detector import MLAnomalyDetector
 from stockwatch.explain.shap_explainer import get_explainer
 from stockwatch.features.build_features import build_feature_matrix
+from stockwatch.logging_utils import get_logger
 from stockwatch.pipeline.explain_anomaly import explain_anomaly
+
+logger = get_logger(__name__)
 
 MIN_ROWS_TO_FIT = 10
 
@@ -24,10 +27,20 @@ def detect_and_explain_anomalies(
     """
     feature_matrix = build_feature_matrix()
     if feature_matrix.height < MIN_ROWS_TO_FIT:
+        logger.info(
+            "Only %d feature row(s), need %d to fit - skipping detection",
+            feature_matrix.height,
+            MIN_ROWS_TO_FIT,
+        )
         return []
 
     detector = MLAnomalyDetector()
     anomalies = detector.detect(feature_matrix)
+    logger.info(
+        "Detected %d anomal(y/ies) out of %d rows",
+        anomalies.height,
+        feature_matrix.height,
+    )
     if anomalies.is_empty():
         return []
 

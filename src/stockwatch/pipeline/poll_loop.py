@@ -21,11 +21,16 @@ from stockwatch.ingestion.news import (
 )
 from stockwatch.ingestion.ratings import ingest_rating_consensus
 from stockwatch.ingestion.splits import ingest_splits
+from stockwatch.logging_utils import get_logger
 from stockwatch.universe.watchlist import get_active_tickers
+
+logger = get_logger(__name__)
 
 
 def run_once() -> None:
-    for ticker in get_active_tickers():
+    tickers = get_active_tickers()
+    logger.info("Starting metadata poll cycle for %d ticker(s)", len(tickers))
+    for ticker in tickers:
         ingest_classification(ticker)
         ingest_index_membership(ticker)
         ingest_rating_consensus(ticker)
@@ -35,10 +40,18 @@ def run_once() -> None:
 
     # One NewsAPI call per distinct sector/industry, not per ticker - keeps
     # usage well under the free tier's daily cap even as the watchlist grows.
-    for sector in _distinct_current_sectors():
+    sectors = _distinct_current_sectors()
+    industries = _distinct_current_industries()
+    logger.info(
+        "Polling news for %d sector(s) and %d industr(y/ies)",
+        len(sectors),
+        len(industries),
+    )
+    for sector in sectors:
         ingest_sector_news(sector)
-    for industry in _distinct_current_industries():
+    for industry in industries:
         ingest_industry_news(industry)
+    logger.info("Metadata poll cycle complete")
 
 
 def _distinct_current_sectors() -> list[str]:
