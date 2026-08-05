@@ -2,3 +2,5 @@
 - So that I don't have run this all the time, give it way to backfill stock data and metadata at my chosen granularity
 - Create a dashboard that shows stock values over time with anomalies marked with a point
     - Clicking on it triggers an LLM call, supplied with point-in-time metadata
+- Make sure the training code for the isolation forest is in place
+- Make sure the code for calling a free-tier LLM is there

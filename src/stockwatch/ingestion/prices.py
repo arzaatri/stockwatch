@@ -5,6 +5,8 @@ for the Flink windowing job) - this module only owns writing raw_price_ticks.
 
 from datetime import UTC, datetime
 
+from sqlalchemy import func, select
+
 from stockwatch.db.engine import session_scope
 from stockwatch.db.models import RawPriceTick
 from stockwatch.ingestion.yfinance_client import Quote
@@ -25,3 +27,14 @@ def append_price_tick(quote: Quote) -> None:
                 ingested_at=datetime.now(UTC),
             )
         )
+
+
+def get_latest_tick_at(ticker: str) -> datetime | None:
+    """The `as_of` of the most recent price tick already ingested for
+    `ticker` - lets backfill fetch only the gap since last poll instead of a
+    fixed lookback every time. None if nothing's been ingested yet.
+    """
+    with session_scope() as session:
+        return session.execute(
+            select(func.max(RawPriceTick.as_of)).where(RawPriceTick.ticker == ticker)
+        ).scalar_one()

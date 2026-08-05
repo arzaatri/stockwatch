@@ -1,8 +1,9 @@
-"""CLI entrypoint: `stockwatch seed|watchlist-count|run-once|poll|stream`."""
+"""CLI entrypoint: `stockwatch seed|watchlist-count|run-once|poll|stream|dashboard`."""
 
 import random
 import subprocess
 import sys
+from pathlib import Path
 
 import click
 
@@ -19,6 +20,7 @@ STREAM_MODULES = [
     "stockwatch.streaming.flink_job",
     "stockwatch.streaming.stats_consumer",
 ]
+DASHBOARD_APP_PATH = Path(__file__).resolve().parent.parent / "dashboard" / "app.py"
 
 
 @click.group()
@@ -71,9 +73,11 @@ def poll(interval: int | None) -> None:
 
 @cli.command()
 @click.option(
-    "--period",
-    default="7d",
-    help="How far back to backfill prices (yfinance period string, e.g. '7d', '60d').",
+    "--max-lookback-days",
+    default=7,
+    type=int,
+    help="Cap on how far back to backfill prices. Per ticker, only fetches the "
+    "gap since its last ingested tick (or this many days back if it has none).",
 )
 @click.option("--prices/--no-prices", default=True, help="Backfill historical prices.")
 @click.option(
@@ -81,13 +85,14 @@ def poll(interval: int | None) -> None:
     default=True,
     help="Backfill metadata (sector, ratings, splits, earnings, news).",
 )
-def backfill(period: str, prices: bool, metadata: bool) -> None:
+def backfill(max_lookback_days: int, prices: bool, metadata: bool) -> None:
     """Populate history in one shot, so you don't need quote_producer/flink_job/
     poll_loop running continuously just to accumulate enough data to detect on.
+    Cheap to run on every startup - already-current tickers fetch almost nothing.
     """
     if prices:
-        tick_count = backfill_prices(period=period)
-        click.echo(f"Backfilled {tick_count} price ticks (period={period}).")
+        tick_count = backfill_prices(max_lookback_days=max_lookback_days)
+        click.echo(f"Backfilled {tick_count} price ticks (max {max_lookback_days}d).")
     if metadata:
         run_poll_once()
         click.echo("Backfilled metadata for active tickers.")
@@ -105,6 +110,14 @@ def stream() -> None:
     except KeyboardInterrupt:
         for process in processes:
             process.terminate()
+
+
+@cli.command()
+def dashboard() -> None:
+    """Launch the Streamlit anomaly dashboard."""
+    subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", str(DASHBOARD_APP_PATH)], check=True
+    )
 
 
 def main() -> None:

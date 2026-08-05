@@ -7,9 +7,10 @@ history on every call).
 """
 
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 
 from stockwatch.config import get_settings
-from stockwatch.ingestion.prices import append_price_tick
+from stockwatch.ingestion.prices import append_price_tick, get_latest_tick_at
 from stockwatch.ingestion.yfinance_client import Quote, get_price_history
 from stockwatch.streaming.rolling_stats import (
     WINDOW_SECONDS,
@@ -40,18 +41,31 @@ def nearest_yf_interval(seconds: int) -> str:
     return _VALID_YF_INTERVALS_SECONDS[chosen]
 
 
-def backfill_prices(period: str = "7d", tickers: list[str] | None = None) -> int:
+def backfill_prices(
+    max_lookback_days: int = 7, tickers: list[str] | None = None
+) -> int:
     """Fetches historical bars at the configured live-polling granularity,
     appends them to raw_price_ticks, then replays the same tumbling-window +
     Welford logic the Flink job runs live to populate windowed_price_stats.
-    Returns the number of raw ticks written.
+
+    Per ticker, only fetches the gap since that ticker's last ingested tick,
+    capped at `max_lookback_days` - safe (and cheap) to call on every
+    startup: a fresh ticker gets the full lookback, a ticker that's already
+    up to date fetches almost nothing. Returns the number of raw ticks written.
     """
     tickers = tickers or get_active_tickers()
     interval = nearest_yf_interval(get_settings().price_poll_interval_seconds)
+    now = datetime.now(UTC)
+    earliest_start = now - timedelta(days=max_lookback_days)
 
     tick_count = 0
     for ticker in tickers:
-        quotes = get_price_history(ticker, period=period, interval=interval)
+        last_tick_at = get_latest_tick_at(ticker)
+        start = max(earliest_start, last_tick_at) if last_tick_at else earliest_start
+        if start >= now:
+            continue  # already caught up
+
+        quotes = get_price_history(ticker, start=start, end=now, interval=interval)
         for quote in quotes:
             append_price_tick(quote)
         _replay_windowed_stats(ticker, quotes)

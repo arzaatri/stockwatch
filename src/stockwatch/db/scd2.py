@@ -59,6 +59,28 @@ def scd2_upsert(
     )
 
 
+def scd2_as_of(
+    session: Session,
+    model: type[Base],
+    natural_key: dict[str, Any],
+    as_of: datetime,
+) -> Any | None:
+    """The dimension row that was current at `as_of`: valid_from <= as_of AND
+    (valid_to IS NULL OR valid_to > as_of). None if no row existed yet at that
+    time. Symmetric to `scd2_upsert` - the generic point-in-time reader every
+    as-of query wrapper (classification.py, ratings.py, ...) delegates to.
+    """
+    stmt = (
+        select(model)
+        .filter_by(**natural_key)
+        .where(
+            model.valid_from <= as_of,
+            (model.valid_to.is_(None)) | (model.valid_to > as_of),
+        )
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
 def _get_current_row(
     session: Session, model: type[Base], natural_key: dict[str, Any]
 ) -> Any:

@@ -83,12 +83,14 @@ def get_quote(ticker: str) -> Quote | None:
     )
 
 
-def get_price_history(ticker: str, period: str, interval: str) -> list[Quote]:
+def get_price_history(
+    ticker: str, start: datetime, end: datetime, interval: str
+) -> list[Quote]:
     """Historical OHLCV bars for backfilling raw_price_ticks - unlike
-    `get_quote` (always just the latest 1m bar), this pulls a full lookback
-    window at whatever interval the caller's polling granularity maps to.
+    `get_quote` (always just the latest 1m bar), this pulls bars over
+    [start, end] at whatever interval the caller's polling granularity maps to.
     """
-    history = yf.Ticker(ticker).history(period=period, interval=interval)
+    history = yf.Ticker(ticker).history(start=start, end=end, interval=interval)
     if history.empty:
         return []
     return [

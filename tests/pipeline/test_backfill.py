@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -46,10 +46,10 @@ def test_backfill_prices_writes_raw_ticks_and_windowed_stats(
         _quote("AAPL", 101.0, 15, minute=2),
     ]
     monkeypatch.setattr(
-        backfill, "get_price_history", lambda ticker, period, interval: quotes
+        backfill, "get_price_history", lambda ticker, start, end, interval: quotes
     )
 
-    tick_count = backfill.backfill_prices(period="7d", tickers=["AAPL"])
+    tick_count = backfill.backfill_prices(tickers=["AAPL"])
 
     assert tick_count == 3
     raw_rows = (
@@ -80,13 +80,11 @@ def test_backfill_prices_is_idempotent_on_windowed_stats(
 ) -> None:
     quotes = [_quote("AAPL", 100.0, 10, minute=0)]
     monkeypatch.setattr(
-        backfill, "get_price_history", lambda ticker, period, interval: quotes
+        backfill, "get_price_history", lambda ticker, start, end, interval: quotes
     )
 
-    backfill.backfill_prices(period="7d", tickers=["AAPL"])
-    backfill.backfill_prices(
-        period="7d", tickers=["AAPL"]
-    )  # re-running should not duplicate
+    backfill.backfill_prices(tickers=["AAPL"])
+    backfill.backfill_prices(tickers=["AAPL"])  # re-running should not duplicate
 
     stats_rows = (
         db_session.execute(
@@ -96,3 +94,61 @@ def test_backfill_prices_is_idempotent_on_windowed_stats(
         .all()
     )
     assert len(stats_rows) == 1
+
+
+def test_backfill_prices_only_fetches_the_gap_since_last_tick(
+    monkeypatch, db_session: Session
+) -> None:
+    now = datetime.now(UTC)
+    last_tick_at = now - timedelta(hours=2)
+    monkeypatch.setattr(backfill, "get_latest_tick_at", lambda ticker: last_tick_at)
+
+    captured_start = {}
+
+    def fake_get_price_history(ticker, start, end, interval):
+        captured_start["value"] = start
+        return []
+
+    monkeypatch.setattr(backfill, "get_price_history", fake_get_price_history)
+
+    backfill.backfill_prices(max_lookback_days=7, tickers=["AAPL"])
+
+    # Should start from the last known tick, not the 7-day cap.
+    assert captured_start["value"] == last_tick_at
+
+
+def test_backfill_prices_caps_at_max_lookback_when_no_prior_ticks(
+    monkeypatch, db_session: Session
+) -> None:
+    monkeypatch.setattr(backfill, "get_latest_tick_at", lambda ticker: None)
+
+    captured_start = {}
+
+    def fake_get_price_history(ticker, start, end, interval):
+        captured_start["value"] = start
+        return []
+
+    monkeypatch.setattr(backfill, "get_price_history", fake_get_price_history)
+
+    before = datetime.now(UTC) - timedelta(days=7)
+    backfill.backfill_prices(max_lookback_days=7, tickers=["AAPL"])
+    after = datetime.now(UTC) - timedelta(days=7)
+
+    assert before <= captured_start["value"] <= after
+
+
+def test_backfill_prices_skips_a_ticker_already_caught_up(
+    monkeypatch, db_session: Session
+) -> None:
+    monkeypatch.setattr(
+        backfill, "get_latest_tick_at", lambda ticker: datetime.now(UTC)
+    )
+
+    def fake_get_price_history(ticker, start, end, interval):
+        raise AssertionError("should not be called when already caught up")
+
+    monkeypatch.setattr(backfill, "get_price_history", fake_get_price_history)
+
+    tick_count = backfill.backfill_prices(tickers=["AAPL"])
+
+    assert tick_count == 0

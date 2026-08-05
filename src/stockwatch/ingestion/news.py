@@ -37,15 +37,28 @@ def ingest_industry_news(industry: str, count: int = 10) -> None:
     )
 
 
-def get_recent_news(scope: NewsScope, scope_key: str, count: int = 5) -> list[NewsItem]:
+def get_recent_news(
+    scope: NewsScope,
+    scope_key: str,
+    count: int = 5,
+    before: datetime | None = None,
+    since: datetime | None = None,
+) -> list[NewsItem]:
+    """Most recent articles for (scope, scope_key). `before`/`since` bound
+    `published_at` when given - e.g. point-in-time explanation wants "the 24h
+    before this anomaly", not an unbounded "most recent N ever" (which would
+    leak future-relative-to-the-anomaly articles into a historical explanation).
+    """
     with session_scope() as session:
+        stmt = select(RawNews).where(
+            RawNews.scope == scope, RawNews.scope_key == scope_key
+        )
+        if before is not None:
+            stmt = stmt.where(RawNews.published_at <= before)
+        if since is not None:
+            stmt = stmt.where(RawNews.published_at >= since)
         rows = (
-            session.execute(
-                select(RawNews)
-                .where(RawNews.scope == scope, RawNews.scope_key == scope_key)
-                .order_by(RawNews.published_at.desc())
-                .limit(count)
-            )
+            session.execute(stmt.order_by(RawNews.published_at.desc()).limit(count))
             .scalars()
             .all()
         )

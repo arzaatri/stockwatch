@@ -210,3 +210,49 @@ def test_get_recent_news_respects_count_limit(db_session: Session) -> None:
     items = news.get_recent_news("company", "AAPL", count=2)
 
     assert len(items) == 2
+
+
+def test_get_recent_news_before_and_since_bound_the_window(db_session: Session) -> None:
+    anchor = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
+    db_session.add_all(
+        [
+            RawNews(
+                scope="company",
+                scope_key="AAPL",
+                headline="Too early",
+                link="https://example.com/too-early",
+                publisher="Example",
+                published_at=anchor - timedelta(hours=25),
+                ingested_at=anchor,
+            ),
+            RawNews(
+                scope="company",
+                scope_key="AAPL",
+                headline="Within window",
+                link="https://example.com/within-window",
+                publisher="Example",
+                published_at=anchor - timedelta(hours=1),
+                ingested_at=anchor,
+            ),
+            RawNews(
+                scope="company",
+                scope_key="AAPL",
+                headline="Too late",
+                link="https://example.com/too-late",
+                publisher="Example",
+                published_at=anchor + timedelta(hours=1),
+                ingested_at=anchor,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    items = news.get_recent_news(
+        "company",
+        "AAPL",
+        count=10,
+        before=anchor,
+        since=anchor - timedelta(hours=24),
+    )
+
+    assert [item.headline for item in items] == ["Within window"]

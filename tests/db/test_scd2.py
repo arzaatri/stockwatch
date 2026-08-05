@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from stockwatch.db.models import DimSectorIndustry
-from stockwatch.db.scd2 import scd2_upsert
+from stockwatch.db.scd2 import scd2_as_of, scd2_upsert
 
 
 def _upsert(session: Session, observed_at: datetime, industry: str) -> None:
@@ -76,3 +76,46 @@ def test_is_current_invariant_holds_after_many_upserts(db_session: Session) -> N
     current_rows = [row for row in _rows(db_session) if row.is_current]
     assert len(current_rows) == 1
     assert current_rows[0].industry == "Industry 4"
+
+
+def test_as_of_before_any_version_returns_none(db_session: Session) -> None:
+    t1 = datetime.now(UTC)
+    _upsert(db_session, t1, "Consumer Electronics")
+
+    row = scd2_as_of(
+        db_session, DimSectorIndustry, {"ticker": "AAPL"}, t1 - timedelta(days=1)
+    )
+
+    assert row is None
+
+
+def test_as_of_between_versions_returns_the_version_current_then(
+    db_session: Session,
+) -> None:
+    t1 = datetime.now(UTC)
+    t2 = t1 + timedelta(days=10)
+    _upsert(db_session, t1, "Consumer Electronics")
+    _upsert(db_session, t2, "Something Else")
+
+    row = scd2_as_of(
+        db_session, DimSectorIndustry, {"ticker": "AAPL"}, t1 + timedelta(days=1)
+    )
+
+    assert row is not None
+    assert row.industry == "Consumer Electronics"
+
+
+def test_as_of_after_latest_version_returns_the_current_row(
+    db_session: Session,
+) -> None:
+    t1 = datetime.now(UTC)
+    t2 = t1 + timedelta(days=10)
+    _upsert(db_session, t1, "Consumer Electronics")
+    _upsert(db_session, t2, "Something Else")
+
+    row = scd2_as_of(
+        db_session, DimSectorIndustry, {"ticker": "AAPL"}, t2 + timedelta(days=1)
+    )
+
+    assert row is not None
+    assert row.industry == "Something Else"
