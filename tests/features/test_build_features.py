@@ -71,6 +71,12 @@ def test_build_feature_matrix_joins_context_onto_price_stats(
     assert row["news_count_recent"] == 0
     for column in FEATURE_COLUMNS:
         assert column in matrix.columns
+    # avg_price/total_volume stay in the matrix (the dashboard charts them
+    # directly) even though they're excluded from FEATURE_COLUMNS.
+    assert row["avg_price"] == 100.0
+    assert row["total_volume"] == 1000
+    assert "avg_price" not in FEATURE_COLUMNS
+    assert "total_volume" not in FEATURE_COLUMNS
 
 
 def test_build_feature_matrix_only_counts_company_scope_news(
@@ -141,3 +147,7 @@ def test_build_feature_matrix_fills_nulls_when_dimensions_are_missing(
     assert row["rating_buy_ratio"] == 0.0
     assert row["split_recent_flag"] == 0
     assert row["sector"] is None
+    # volume_zscore wasn't set on the WindowedPriceStats row above (nullable
+    # column) - must come back filled, not NULL, or IsolationForest.fit()
+    # would blow up on NaN.
+    assert row["volume_zscore"] == 0.0

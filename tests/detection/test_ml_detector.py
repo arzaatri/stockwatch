@@ -38,3 +38,18 @@ def test_detect_flags_the_injected_outlier_most_anomalous_first() -> None:
     assert 50.0 in anomalies["price_zscore"].to_list()
     scores = anomalies["anomaly_score"].to_list()
     assert scores == sorted(scores)
+
+
+def test_fit_raises_below_min_rows() -> None:
+    detector = MLAnomalyDetector()
+
+    with pytest.raises(ValueError):
+        detector.fit(_synthetic_matrix(n=5))
+
+
+def test_contamination_passes_through_to_the_model() -> None:
+    detector = MLAnomalyDetector(contamination=0.1)
+
+    detector.fit(_synthetic_matrix())
+
+    assert detector.model.contamination == 0.1

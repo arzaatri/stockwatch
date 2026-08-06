@@ -1,7 +1,9 @@
 import numpy as np
 import polars as pl
+import pytest
 
 from stockwatch.detection.isolation_forest import (
+    MIN_ROWS_TO_FIT,
     fit_isolation_forest,
     get_anomalies,
     score_anomalies,
@@ -46,3 +48,32 @@ def test_get_anomalies_sorts_most_anomalous_first() -> None:
 
     scores = anomalies["anomaly_score"].to_list()
     assert scores == sorted(scores)
+
+
+def test_fit_raises_below_min_rows() -> None:
+    matrix = _synthetic_matrix(n=MIN_ROWS_TO_FIT - 1)
+
+    with pytest.raises(ValueError, match="at least"):
+        fit_isolation_forest(matrix)
+
+
+def test_fit_accepts_exactly_min_rows() -> None:
+    matrix = _synthetic_matrix(n=MIN_ROWS_TO_FIT)
+
+    fit_isolation_forest(matrix)  # should not raise
+
+
+def test_contamination_is_configurable() -> None:
+    matrix = _synthetic_matrix()
+
+    model = fit_isolation_forest(matrix, contamination=0.5)
+
+    assert model.contamination == 0.5
+
+
+def test_to_feature_array_raises_a_clear_error_on_nan() -> None:
+    matrix = _synthetic_matrix(n=5)
+    matrix = matrix.with_columns(pl.lit(None).cast(pl.Float64).alias("price_zscore"))
+
+    with pytest.raises(ValueError, match="NaN"):
+        to_feature_array(matrix)

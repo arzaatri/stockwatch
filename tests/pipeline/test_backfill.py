@@ -72,6 +72,7 @@ def test_backfill_prices_writes_raw_ticks_and_windowed_stats(
     assert len(stats_rows) == 3
     assert stats_rows[0].avg_price == 100.0
     assert stats_rows[0].price_zscore == 0.0
+    assert stats_rows[0].volume_zscore == 0.0
     assert stats_rows[1].avg_price == 102.0
 
 

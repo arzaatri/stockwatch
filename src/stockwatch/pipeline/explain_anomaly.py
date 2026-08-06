@@ -11,8 +11,9 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from stockwatch.config import get_settings
 from stockwatch.detection.isolation_forest import to_feature_array
-from stockwatch.detection.ml_detector import MLAnomalyDetector
+from stockwatch.detection.model_store import is_model_stale, resolve_ml_detector
 from stockwatch.explain.shap_explainer import (
     get_explainer,
     top_features_for_anomaly,
@@ -85,8 +86,16 @@ def explain_anomaly_at(
     the only strategy with a SHAP-compatible model.
     """
     feature_matrix = build_feature_matrix()
-    detector = MLAnomalyDetector()
-    detector.fit(feature_matrix)
+    detector, trained_at = resolve_ml_detector(feature_matrix)
+    if trained_at is not None:
+        max_age_days = get_settings().model_stale_after_days
+        if is_model_stale(trained_at, max_age_days):
+            logger.warning(
+                "Model trained at %s is stale (> %d days old) - run "
+                "train_model.sh to refresh it",
+                trained_at,
+                max_age_days,
+            )
     scored = detector.score(feature_matrix)
 
     matching = scored.filter(

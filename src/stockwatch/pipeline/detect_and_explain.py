@@ -1,21 +1,24 @@
 """Orchestrates the "explain" half of a run: build features -> detect
-anomalies (MLAnomalyDetector) -> SHAP -> point-in-time LLM explanation
-(pipeline/explain_anomaly.py), for each currently flagged anomaly.
-`pipeline/poll_loop.py` handles the "ingest" half.
+anomalies (against the most recently trained model, see train_model.sh) ->
+SHAP -> point-in-time LLM explanation (pipeline/explain_anomaly.py), for each
+currently flagged anomaly. `pipeline/poll_loop.py` handles the "ingest" half.
 """
 
 from typing import Any
 
-from stockwatch.detection.isolation_forest import to_feature_array
-from stockwatch.detection.ml_detector import MLAnomalyDetector
+from stockwatch.config import get_settings
+from stockwatch.detection.isolation_forest import (
+    MIN_ROWS_TO_FIT,
+    get_anomalies,
+    to_feature_array,
+)
+from stockwatch.detection.model_store import is_model_stale, resolve_ml_detector
 from stockwatch.explain.shap_explainer import get_explainer
 from stockwatch.features.build_features import build_feature_matrix
 from stockwatch.logging_utils import get_logger
 from stockwatch.pipeline.explain_anomaly import explain_anomaly
 
 logger = get_logger(__name__)
-
-MIN_ROWS_TO_FIT = 10
 
 
 def detect_and_explain_anomalies(
@@ -34,8 +37,19 @@ def detect_and_explain_anomalies(
         )
         return []
 
-    detector = MLAnomalyDetector()
-    anomalies = detector.detect(feature_matrix)
+    detector, trained_at = resolve_ml_detector(feature_matrix)
+    if trained_at is not None:
+        max_age_days = get_settings().model_stale_after_days
+        if is_model_stale(trained_at, max_age_days):
+            logger.warning(
+                "Model trained at %s is stale (> %d days old) - run "
+                "train_model.sh to refresh it",
+                trained_at,
+                max_age_days,
+            )
+
+    scored = detector.score(feature_matrix)
+    anomalies = get_anomalies(scored)
     logger.info(
         "Detected %d anomal(y/ies) out of %d rows",
         anomalies.height,

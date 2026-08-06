@@ -13,6 +13,7 @@ from stockwatch.pipeline.backfill import backfill_prices
 from stockwatch.pipeline.detect_and_explain import detect_and_explain_anomalies
 from stockwatch.pipeline.poll_loop import run_forever as run_poll_forever
 from stockwatch.pipeline.poll_loop import run_once as run_poll_once
+from stockwatch.pipeline.train_model import train_and_save_model
 from stockwatch.universe.index_constituents import fetch_index_table
 from stockwatch.universe.watchlist import add_ticker, watchlist_count
 
@@ -109,6 +110,31 @@ def backfill(max_lookback_days: int, prices: bool, metadata: bool) -> None:
     if metadata:
         run_poll_once()
         click.echo("Backfilled metadata for active tickers.")
+
+
+@cli.command(name="train-model")
+@click.option(
+    "--contamination",
+    default="auto",
+    help="Expected proportion of anomalies, e.g. 0.05, or 'auto' (sklearn's default heuristic).",
+)
+@click.option("--random-state", default=0, type=int)
+def train_model_command(contamination: str, random_state: int) -> None:
+    """Train an IsolationForest on current data and save it, so the app reuses
+    one trained model instead of refitting from scratch on every call.
+    """
+    resolved_contamination: float | str = (
+        contamination if contamination == "auto" else float(contamination)
+    )
+    logger.info(
+        "stockwatch train-model --contamination %s --random-state %d",
+        contamination,
+        random_state,
+    )
+    path = train_and_save_model(
+        contamination=resolved_contamination, random_state=random_state
+    )
+    click.echo(f"Trained and saved model to {path}")
 
 
 @cli.command()

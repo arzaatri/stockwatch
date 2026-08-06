@@ -53,13 +53,36 @@ class QuoteTimestampAssigner(TimestampAssigner):
         return json.loads(value)["event_time_ms"]
 
 
+def _fold_running_stats(
+    context: ProcessWindowFunction.Context, state_name: str, new_value: float
+) -> tuple[TickerRunningStats, float]:
+    """Loads `state_name`'s TickerRunningStats from Flink's global (cross-window)
+    keyed state, folds `new_value` in, persists the updated state, and returns
+    (new_stats, zscore) - the load/update/save boilerplate shared by both the
+    price and volume running stats below.
+    """
+    state_descriptor = ValueStateDescriptor(state_name, Types.STRING())
+    state = context.global_state().get_state(state_descriptor)
+    raw_state = state.value()
+    running_stats = (
+        TickerRunningStats.model_validate_json(raw_state)
+        if raw_state
+        else TickerRunningStats()
+    )
+    new_stats, zscore = update_running_stats(running_stats, new_value)
+    state.update(new_stats.model_dump_json())
+    return new_stats, zscore
+
+
 class RollingStatsProcessFunction(ProcessWindowFunction):
     """Windowing: aggregates avg price / total volume within one tumbling
-    window per ticker. Keyed state: folds that window's average into a
-    per-ticker running mean/variance kept in `global_state()` (persists
-    across window boundaries, unlike window_state()), so the z-score is
-    computed against the ticker's own recent trailing behavior rather than
-    only what happened in this single window.
+    window per ticker. Keyed state: folds that window's price average *and*
+    volume total into per-ticker running mean/variance kept in `global_state()`
+    (persists across window boundaries, unlike window_state()), so both
+    z-scores are computed against the ticker's own recent trailing behavior
+    rather than only what happened in this single window - and, critically,
+    relative to that ticker's own scale, not raw dollar/share-count levels
+    that vary by orders of magnitude across tickers.
     """
 
     def process(
@@ -69,16 +92,12 @@ class RollingStatsProcessFunction(ProcessWindowFunction):
         avg_price = sum(quote["price"] for quote in quotes) / len(quotes)
         total_volume = sum(quote["volume"] for quote in quotes)
 
-        state_descriptor = ValueStateDescriptor("running_stats", Types.STRING())
-        state = context.global_state().get_state(state_descriptor)
-        raw_state = state.value()
-        running_stats = (
-            TickerRunningStats.model_validate_json(raw_state)
-            if raw_state
-            else TickerRunningStats()
+        price_stats, price_zscore = _fold_running_stats(
+            context, "running_price_stats", avg_price
         )
-        new_stats, zscore = update_running_stats(running_stats, avg_price)
-        state.update(new_stats.model_dump_json())
+        _volume_stats, volume_zscore = _fold_running_stats(
+            context, "running_volume_stats", float(total_volume)
+        )
 
         window: TimeWindow = context.window()
         yield json.dumps(
@@ -87,8 +106,9 @@ class RollingStatsProcessFunction(ProcessWindowFunction):
                 "window_end_ms": window.end,
                 "avg_price": avg_price,
                 "total_volume": total_volume,
-                "volatility_estimate": new_stats.volatility,
-                "price_zscore": zscore,
+                "volatility_estimate": price_stats.volatility,
+                "price_zscore": price_zscore,
+                "volume_zscore": volume_zscore,
             }
         )
 

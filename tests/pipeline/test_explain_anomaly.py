@@ -1,9 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 from sqlalchemy.orm import Session
 
 from stockwatch.db.models import Watchlist, WindowedPriceStats
+from stockwatch.detection import model_store
 from stockwatch.explain.shap_explainer import FeatureAttribution
 from stockwatch.ingestion.yfinance_client import (
     NewsItem,
@@ -119,6 +121,15 @@ def test_explain_anomaly_handles_missing_sector_and_rating(monkeypatch) -> None:
     assert context.recent_news == []
 
 
+@pytest.fixture(autouse=True)
+def _isolated_models_dir(tmp_path, monkeypatch):
+    """Never touch the real project models/ directory - a stray real model
+    on disk would otherwise make explain_anomaly_at's detector resolution
+    order/environment dependent instead of always fitting fresh here.
+    """
+    monkeypatch.setattr(model_store, "MODELS_DIR", tmp_path / "models")
+
+
 def test_explain_anomaly_at_resolves_the_correct_historical_row(
     monkeypatch, db_session: Session
 ) -> None:
@@ -134,7 +145,6 @@ def test_explain_anomaly_at_resolves_the_correct_historical_row(
         window_end = now - timedelta(minutes=30 - i)
         avg_price = 100.0 + float(rng.normal())
         if i == 25:
-            avg_price = 500.0  # obvious outlier
             target_window_end = window_end
         rows.append(
             WindowedPriceStats(

@@ -7,6 +7,16 @@ SHAP (detection.py does the polars -> numpy conversion). `sector`/`industry`
 are kept alongside as metadata for the LLM explanation step, not fed to the
 model - a categorical field with the plan's 20-ticker scale isn't worth the
 one-hot-encoding complexity yet.
+
+Deliberately excluded from FEATURE_COLUMNS: raw `avg_price`/`total_volume`.
+Both are on absolute scales that vary by orders of magnitude across tickers
+(a $5 stock vs. a $500 stock; a thinly-traded name vs. a heavily-traded one),
+so a model shared across the whole watchlist would partly learn "which
+ticker is this" rather than "is this unusual for its own history." Both
+stay as matrix columns (the dashboard charts `avg_price` directly) but are
+fed to the model only via their ticker-relative forms - `price_zscore` and
+`volume_zscore`, both computed via the same per-ticker Welford running stats
+(streaming/rolling_stats.py) that also drive `volatility_estimate`.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -28,10 +38,9 @@ from stockwatch.db.models import (
 from stockwatch.universe.watchlist import get_active_tickers
 
 FEATURE_COLUMNS = [
-    "avg_price",
-    "total_volume",
     "volatility_estimate",
     "price_zscore",
+    "volume_zscore",
     "rating_buy_ratio",
     "rating_sell_ratio",
     "split_recent_flag",
@@ -46,9 +55,12 @@ SPLIT_LOOKBACK_DAYS = 30
 EARNINGS_NEAR_DAYS = 14
 ESTIMATE_SHIFT_LOOKBACK_DAYS = 14
 
-_EMPTY_SCHEMA = {"ticker": pl.Utf8, "window_end": pl.Datetime("us", "UTC")} | {
-    column: pl.Float64 for column in FEATURE_COLUMNS
-}
+_EMPTY_SCHEMA = {
+    "ticker": pl.Utf8,
+    "window_end": pl.Datetime("us", "UTC"),
+    "avg_price": pl.Float64,
+    "total_volume": pl.Int64,
+} | {column: pl.Float64 for column in FEATURE_COLUMNS}
 
 
 def build_feature_matrix(tickers: list[str] | None = None) -> pl.DataFrame:
@@ -77,6 +89,13 @@ def build_feature_matrix(tickers: list[str] | None = None) -> pl.DataFrame:
         )
 
     return feature_matrix.with_columns(
+        # volatility_estimate/price_zscore/volume_zscore are nullable in the DB
+        # (Welford stats always produce a real value in practice, but the
+        # column itself doesn't guarantee it) - fill defensively so a stray
+        # NULL can't reach IsolationForest.fit() and blow up with a NaN error.
+        pl.col("volatility_estimate").fill_null(0.0),
+        pl.col("price_zscore").fill_null(0.0),
+        pl.col("volume_zscore").fill_null(0.0),
         pl.col("rating_buy_ratio").fill_null(0.0),
         pl.col("rating_sell_ratio").fill_null(0.0),
         pl.col("split_recent_flag").fill_null(0),
@@ -99,6 +118,7 @@ def _load_price_stats(session: Session, tickers: list[str]) -> pl.DataFrame:
             WindowedPriceStats.total_volume,
             WindowedPriceStats.volatility_estimate,
             WindowedPriceStats.price_zscore,
+            WindowedPriceStats.volume_zscore,
         ).where(WindowedPriceStats.ticker.in_(tickers))
     ).all()
     return _rows_to_polars(
@@ -110,6 +130,7 @@ def _load_price_stats(session: Session, tickers: list[str]) -> pl.DataFrame:
             "total_volume": pl.Int64,
             "volatility_estimate": pl.Float64,
             "price_zscore": pl.Float64,
+            "volume_zscore": pl.Float64,
         },
     )
 

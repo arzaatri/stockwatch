@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     newsapi_api_key: str = ""
 
+    model_stale_after_days: int = 7
+
     @property
     def postgres_dsn(self) -> str:
         return (

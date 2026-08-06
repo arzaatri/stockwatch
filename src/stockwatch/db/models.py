@@ -92,6 +92,7 @@ class WindowedPriceStats(Base):
     total_volume: Mapped[int] = mapped_column(BigInteger)
     volatility_estimate: Mapped[float | None] = mapped_column(Double, nullable=True)
     price_zscore: Mapped[float | None] = mapped_column(Double, nullable=True)
+    volume_zscore: Mapped[float | None] = mapped_column(Double, nullable=True)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

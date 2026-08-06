@@ -86,23 +86,33 @@ def backfill_prices(
 
 
 def _replay_windowed_stats(ticker: str, quotes: list[Quote]) -> None:
+    """Mirrors flink_job.py's RollingStatsProcessFunction: buckets ticks into
+    WINDOW_SECONDS windows, then folds each window's price average *and*
+    volume total into their own running Welford stats, in the same order the
+    live job would have seen them.
+    """
     windows: dict[int, list[Quote]] = defaultdict(list)
     for quote in quotes:
         windows[int(quote.as_of.timestamp()) // WINDOW_SECONDS].append(quote)
 
-    running = TickerRunningStats()
+    price_stats = TickerRunningStats()
+    volume_stats = TickerRunningStats()
     for bucket in sorted(windows):
         bucket_quotes = windows[bucket]
         avg_price = sum(q.price for q in bucket_quotes) / len(bucket_quotes)
         total_volume = sum(q.volume or 0 for q in bucket_quotes)
-        running, zscore = update_running_stats(running, avg_price)
+        price_stats, price_zscore = update_running_stats(price_stats, avg_price)
+        volume_stats, volume_zscore = update_running_stats(
+            volume_stats, float(total_volume)
+        )
         persist_stats_record(
             {
                 "ticker": ticker,
                 "window_end_ms": (bucket + 1) * WINDOW_SECONDS * 1000,
                 "avg_price": avg_price,
                 "total_volume": total_volume,
-                "volatility_estimate": running.volatility,
-                "price_zscore": zscore,
+                "volatility_estimate": price_stats.volatility,
+                "price_zscore": price_zscore,
+                "volume_zscore": volume_zscore,
             }
         )

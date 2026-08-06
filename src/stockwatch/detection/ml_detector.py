@@ -12,13 +12,18 @@ from stockwatch.detection.isolation_forest import fit_isolation_forest, score_an
 
 
 class MLAnomalyDetector(AnomalyDetector):
-    def __init__(self, random_state: int = 0) -> None:
+    def __init__(
+        self, random_state: int = 0, contamination: float | str = "auto"
+    ) -> None:
         self.random_state = random_state
+        self.contamination = contamination
         self.model: IsolationForest | None = None
 
     def fit(self, feature_matrix: pl.DataFrame) -> None:
         self.model = fit_isolation_forest(
-            feature_matrix, random_state=self.random_state
+            feature_matrix,
+            random_state=self.random_state,
+            contamination=self.contamination,
         )
 
     def score(self, feature_matrix: pl.DataFrame) -> pl.DataFrame:

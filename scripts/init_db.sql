@@ -74,6 +74,7 @@ CREATE TABLE windowed_price_stats (
     total_volume        BIGINT NOT NULL,
     volatility_estimate DOUBLE PRECISION,
     price_zscore        DOUBLE PRECISION,
+    volume_zscore       DOUBLE PRECISION,
     ingested_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (ticker, window_end)
 );

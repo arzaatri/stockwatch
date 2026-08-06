@@ -18,3 +18,8 @@ jars/
 # Log files
 logs/
 
+# Trained model artifacts (see train_model.sh)
+models/
+
+TODO.txt
+NOTES.txt

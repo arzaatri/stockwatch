@@ -12,8 +12,8 @@ import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
-from stockwatch.detection.base import AnomalyDetector
-from stockwatch.detection.ml_detector import MLAnomalyDetector
+from stockwatch.config import get_settings
+from stockwatch.detection.model_store import is_model_stale, resolve_ml_detector
 from stockwatch.detection.simple_detector import SimpleAnomalyDetector
 from stockwatch.features.build_features import build_feature_matrix
 from stockwatch.logging_utils import get_logger
@@ -22,6 +22,9 @@ from stockwatch.universe.watchlist import get_active_tickers
 
 logger = get_logger(__name__)
 
+ML_LABEL = "ML (IsolationForest)"
+SIMPLE_LABEL = "Simple (3-sigma)"
+
 LOOKBACK_OPTIONS: dict[str, timedelta | None] = {
     "1 day": timedelta(days=1),
     "7 days": timedelta(days=7),
@@ -29,27 +32,40 @@ LOOKBACK_OPTIONS: dict[str, timedelta | None] = {
     "90 days": timedelta(days=90),
     "All": None,
 }
-DETECTOR_CHOICES: dict[str, type[AnomalyDetector]] = {
-    "ML (IsolationForest)": MLAnomalyDetector,
-    "Simple (3-sigma)": SimpleAnomalyDetector,
-}
 
 
 @st.cache_data(ttl=60)
 def _load_scored_matrix(
     tickers: tuple[str, ...], lookback_label: str, detector_label: str
-) -> pl.DataFrame:
+) -> tuple[pl.DataFrame, datetime | None]:
+    """Returns (scored matrix, model trained_at). trained_at is only
+    meaningful for the ML detector - None for Simple (no persisted model) or
+    when the ML path fell back to an ad-hoc, unpersisted fit.
+    """
     matrix = build_feature_matrix(list(tickers))
     lookback = LOOKBACK_OPTIONS[lookback_label]
     if lookback is not None:
         cutoff = datetime.now(UTC) - lookback
         matrix = matrix.filter(pl.col("window_end") >= cutoff)
     if matrix.is_empty():
-        return matrix
+        return matrix, None
 
-    detector = DETECTOR_CHOICES[detector_label]()
-    detector.fit(matrix)
-    return detector.score(matrix)
+    try:
+        if detector_label == ML_LABEL:
+            detector, trained_at = resolve_ml_detector(matrix)
+        else:
+            detector, trained_at = SimpleAnomalyDetector(), None
+            detector.fit(matrix)
+    except ValueError:
+        # e.g. IsolationForest needs a minimum number of rows to fit
+        # meaningfully - not enough history yet for this ticker/lookback.
+        logger.info(
+            "Not enough rows (%d) to fit %s for this selection",
+            matrix.height,
+            detector_label,
+        )
+        return matrix.clear(), None
+    return detector.score(matrix), trained_at
 
 
 @st.cache_data
@@ -150,7 +166,7 @@ def main() -> None:
     with st.sidebar:
         selected = st.multiselect("Tickers", tickers, default=tickers[:3])
         lookback_label = st.selectbox("Lookback", list(LOOKBACK_OPTIONS), index=1)
-        detector_label = st.radio("Detector", list(DETECTOR_CHOICES))
+        detector_label = st.radio("Detector", [ML_LABEL, SIMPLE_LABEL])
 
     if not selected:
         st.info("Select at least one ticker.")
@@ -162,10 +178,29 @@ def main() -> None:
         lookback_label,
         detector_label,
     )
-    scored = _load_scored_matrix(tuple(selected), lookback_label, detector_label)
+    scored, trained_at = _load_scored_matrix(
+        tuple(selected), lookback_label, detector_label
+    )
     if scored.is_empty():
         st.warning("No price history yet for the selected tickers/lookback.")
         return
+
+    if detector_label == ML_LABEL:
+        if trained_at is None:
+            st.info(
+                "No trained model found - scoring with an ad-hoc fit for this "
+                "view. Run `train_model.sh` to persist one."
+            )
+        else:
+            max_age_days = get_settings().model_stale_after_days
+            age_days = (datetime.now(UTC) - trained_at).days
+            if is_model_stale(trained_at, max_age_days):
+                st.warning(
+                    f"Model was trained {age_days} day(s) ago (older than "
+                    f"{max_age_days}) - consider running `train_model.sh` to refresh it."
+                )
+            else:
+                st.caption(f"Model trained {trained_at.isoformat()} ({age_days}d ago)")
 
     for ticker in selected:
         ticker_rows = scored.filter(pl.col("ticker") == ticker).sort("window_end")

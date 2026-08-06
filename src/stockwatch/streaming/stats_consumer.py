@@ -42,6 +42,7 @@ def persist_stats_record(record: dict[str, Any]) -> None:
                 total_volume=record["total_volume"],
                 volatility_estimate=record["volatility_estimate"],
                 price_zscore=record["price_zscore"],
+                volume_zscore=record["volume_zscore"],
                 ingested_at=datetime.now(UTC),
             )
             .on_conflict_do_nothing(index_elements=["ticker", "window_end"])
