@@ -149,6 +149,9 @@ def get_rating_consensus(ticker: str) -> RatingConsensus | None:
 
 def get_splits(ticker: str) -> list[SplitEvent]:
     splits = yf.Ticker(ticker).splits
+    if splits is None:
+        logger.info("No split data available for %s (invalid/delisted ticker?)", ticker)
+        return []
     return [
         SplitEvent(
             ticker=ticker, split_date=split_date.to_pydatetime(), numerator=float(ratio)
@@ -184,6 +187,9 @@ def get_earnings_estimate(ticker: str) -> EarningsEstimate | None:
 
 def get_news(ticker: str, count: int = 10) -> list[NewsItem]:
     raw_items = yf.Ticker(ticker).get_news(count=count)
+    if raw_items is None:
+        logger.info("No news available for %s (invalid/delisted ticker?)", ticker)
+        return []
     news_items = []
     for item in raw_items:
         content = item.get("content", {})

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     slow_dim_poll_interval_seconds: int = 86400
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
 
     newsapi_api_key: str = ""
 
