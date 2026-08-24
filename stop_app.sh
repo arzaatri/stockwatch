@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 echo "Stopping stockwatch processes..."
-pkill -f "stockwatch (stream|dashboard|poll)" 2>/dev/null || true
+pkill -f "stockwatch (stream|dashboard|poll|serve|serve-inference)" 2>/dev/null || true
 pkill -f "stockwatch\.streaming\." 2>/dev/null || true
 pkill -f "streamlit run .*dashboard/app\.py" 2>/dev/null || true
 

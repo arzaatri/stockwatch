@@ -1,11 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import polars as pl
 import pytest
 from sqlalchemy.orm import Session
 
+from stockwatch.api import inference_client
 from stockwatch.db.models import Watchlist, WindowedPriceStats
-from stockwatch.detection import model_store
 from stockwatch.explain.shap_explainer import FeatureAttribution
 from stockwatch.ingestion.yfinance_client import (
     NewsItem,
@@ -14,6 +15,8 @@ from stockwatch.ingestion.yfinance_client import (
 )
 from stockwatch.llm.schemas import ExplanationOutput, GraphState
 from stockwatch.pipeline import explain_anomaly as explain_anomaly_module
+
+_TOP_FEATURES = [FeatureAttribution(feature="price_zscore", value=3.0, shap_value=-0.1)]
 
 
 class _FakeGraph:
@@ -52,13 +55,6 @@ def _patch_common(
     monkeypatch.setattr(
         explain_anomaly_module, "build_default_graph", lambda: _FakeGraph()
     )
-    monkeypatch.setattr(
-        explain_anomaly_module,
-        "top_features_for_anomaly",
-        lambda explainer, row, k=5: [
-            FeatureAttribution(feature="price_zscore", value=3.0, shap_value=-0.1)
-        ],
-    )
 
 
 def test_explain_anomaly_builds_context_from_as_of_metadata(monkeypatch) -> None:
@@ -85,8 +81,7 @@ def test_explain_anomaly_builds_context_from_as_of_metadata(monkeypatch) -> None
         ticker="AAPL",
         window_end=window_end,
         anomaly_score=-0.5,
-        explainer=object(),
-        feature_row=np.zeros((1, 1)),
+        top_features=_TOP_FEATURES,
     )
 
     context = result["context"]
@@ -96,6 +91,7 @@ def test_explain_anomaly_builds_context_from_as_of_metadata(monkeypatch) -> None
     assert context.industry == "Consumer Electronics"
     assert context.rating is not None
     assert context.rating.buy == 2
+    assert context.top_features == _TOP_FEATURES
     # company + sector + industry each queried, all returning the fake list
     assert len(context.recent_news) == 3
     assert result["explanation"].summary == "test summary"
@@ -109,8 +105,7 @@ def test_explain_anomaly_handles_missing_sector_and_rating(monkeypatch) -> None:
         ticker="AAPL",
         window_end=window_end,
         anomaly_score=-0.5,
-        explainer=object(),
-        feature_row=np.zeros((1, 1)),
+        top_features=_TOP_FEATURES,
     )
 
     context = result["context"]
@@ -121,19 +116,27 @@ def test_explain_anomaly_handles_missing_sector_and_rating(monkeypatch) -> None:
     assert context.recent_news == []
 
 
-@pytest.fixture(autouse=True)
-def _isolated_models_dir(tmp_path, monkeypatch):
-    """Never touch the real project models/ directory - a stray real model
-    on disk would otherwise make explain_anomaly_at's detector resolution
-    order/environment dependent instead of always fitting fresh here.
-    """
-    monkeypatch.setattr(model_store, "MODELS_DIR", tmp_path / "models")
+def _fake_score_all_anomalous(top_features=_TOP_FEATURES):
+    def _fake_score(matrix: pl.DataFrame, top_k_features: int = 5):
+        height = matrix.height
+        scored_matrix = matrix.with_columns(
+            pl.Series("anomaly_score", [-0.5] * height),
+            pl.Series("is_anomaly", [1] * height),
+        )
+        top_features_by_key = {
+            (row["ticker"], row["window_end"]): top_features
+            for row in matrix.iter_rows(named=True)
+        }
+        return inference_client.ScoreResult(scored_matrix, top_features_by_key, None)
+
+    return _fake_score
 
 
 def test_explain_anomaly_at_resolves_the_correct_historical_row(
     monkeypatch, db_session: Session
 ) -> None:
     _patch_common(monkeypatch)
+    monkeypatch.setattr(inference_client, "score", _fake_score_all_anomalous())
     now = datetime.now(UTC)
     rng = np.random.default_rng(0)
 
@@ -165,3 +168,60 @@ def test_explain_anomaly_at_resolves_the_correct_historical_row(
 
     assert result["context"].ticker == "AAPL"
     assert result["context"].as_of == target_window_end
+
+
+def test_explain_anomaly_at_raises_for_a_row_not_flagged_anomalous(
+    monkeypatch, db_session: Session
+) -> None:
+    _patch_common(monkeypatch)
+    now = datetime.now(UTC)
+    window_end = now - timedelta(minutes=1)
+    db_session.add(Watchlist(ticker="AAPL", added_at=now, is_active=True))
+    db_session.add(
+        WindowedPriceStats(
+            ticker="AAPL",
+            window_end=window_end,
+            avg_price=100.0,
+            total_volume=1000,
+            volatility_estimate=0.1,
+            price_zscore=0.0,
+            ingested_at=now,
+        )
+    )
+    db_session.commit()
+
+    def _fake_score_not_anomalous(matrix: pl.DataFrame, top_k_features: int = 5):
+        scored_matrix = matrix.with_columns(
+            pl.Series("anomaly_score", [0.1] * matrix.height),
+            pl.Series("is_anomaly", [0] * matrix.height),
+        )
+        return inference_client.ScoreResult(scored_matrix, {}, None)
+
+    monkeypatch.setattr(inference_client, "score", _fake_score_not_anomalous)
+
+    with pytest.raises(ValueError, match="not currently flagged"):
+        explain_anomaly_module.explain_anomaly_at("AAPL", window_end)
+
+
+def test_explain_anomaly_at_raises_when_row_missing(
+    monkeypatch, db_session: Session
+) -> None:
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(inference_client, "score", _fake_score_all_anomalous())
+    now = datetime.now(UTC)
+    db_session.add(Watchlist(ticker="AAPL", added_at=now, is_active=True))
+    db_session.add(
+        WindowedPriceStats(
+            ticker="AAPL",
+            window_end=now,
+            avg_price=100.0,
+            total_volume=1000,
+            volatility_estimate=0.1,
+            price_zscore=0.0,
+            ingested_at=now,
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="No feature row found"):
+        explain_anomaly_module.explain_anomaly_at("AAPL", now - timedelta(days=1))

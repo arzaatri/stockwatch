@@ -5,6 +5,11 @@ slow-changing metadata (sector, index membership, analyst ratings, splits, earni
 with CDC/SCD2 in Postgres, IsolationForest anomaly detection, SHAP explanations, and an LLM
 (Gemini, via LangChain/LangGraph) that reasons about the likely cause.
 
+Model serving is a separate microservice from everything else: `inference_service/` owns the
+trained IsolationForest artifact and SHAP, is stateless/DB-agnostic, and is called over HTTP by
+the orchestration `api/` service (Postgres, news/ratings, the LLM, async job tracking). They're
+independently deployable/scalable - see `k8s/` for a minimal demo of that.
+
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/)
@@ -31,7 +36,21 @@ uv run stockwatch seed --n 20     # seed the watchlist
 uv run stockwatch watchlist-count
 uv run stockwatch poll --interval 3600   # metadata poll loop only
 uv run stockwatch stream                 # producer + Flink job + stats consumer
+uv run stockwatch train-model            # fit + persist an IsolationForest
+uv run stockwatch serve-inference        # isolation-forest microservice (default :8001)
+uv run stockwatch serve                  # orchestration api (default :8000) - needs the above running
 uv run stockwatch run-once               # one metadata cycle, then detect + explain anomalies
+```
+
+`start_app.sh` launches both `serve-inference` and `serve` for you. With them running:
+
+```bash
+curl http://localhost:8000/detect                                    # fast path, no LLM
+curl -X POST http://localhost:8000/explain \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "window_end": "2026-01-05T12:00:00Z"}'       # -> {"job_id": ...}
+curl http://localhost:8000/explain/<job_id>                          # poll for the LLM result
+curl http://localhost:8000/models/current                            # model staleness/metadata
 ```
 
 ## Tests
@@ -48,5 +67,8 @@ Everything is tested except the actual Gemini network call, which is stubbed out
 
 See `src/stockwatch/`: `db/` (engine, models, the generic SCD2 upsert), `universe/` (ticker
 watchlist, index constituents), `ingestion/` (yfinance pulls), `streaming/` (Redpanda/PyFlink
-real-time price path), `features/`, `detection/`, `explain/` (SHAP), `llm/` (LangGraph), and
-`pipeline/` (orchestration + CLI).
+real-time price path), `features/`, `detection/` + `explain/` (SHAP) - the model logic itself,
+served by `inference_service/` (the isolation-forest microservice: `/health`, `/model/current`,
+`/score`) - `llm/` (LangGraph), `api/` (the orchestration service: Postgres, news/ratings, the
+LLM, async `/explain` jobs; talks to `inference_service/` over HTTP via `api/inference_client.py`),
+`dashboard/` (Streamlit), and `pipeline/` (batch orchestration + the `stockwatch` CLI).

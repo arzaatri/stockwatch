@@ -8,16 +8,10 @@ implementations that could drift (one point-in-time-correct, one not).
 from datetime import datetime, timedelta
 from typing import Any
 
-import numpy as np
 import polars as pl
 
-from stockwatch.config import get_settings
-from stockwatch.detection.isolation_forest import to_feature_array
-from stockwatch.detection.model_store import is_model_stale, resolve_ml_detector
-from stockwatch.explain.shap_explainer import (
-    get_explainer,
-    top_features_for_anomaly,
-)
+from stockwatch.api import inference_client
+from stockwatch.explain.shap_explainer import FeatureAttribution
 from stockwatch.features.build_features import build_feature_matrix
 from stockwatch.ingestion.classification import get_sector_industry_as_of
 from stockwatch.ingestion.news import get_recent_news
@@ -36,19 +30,15 @@ def explain_anomaly(
     ticker: str,
     window_end: datetime,
     anomaly_score: float,
-    explainer: Any,
-    feature_row: np.ndarray,
-    top_k_features: int = 5,
+    top_features: list[FeatureAttribution],
     news_count: int = 5,
 ) -> dict[str, Any]:
     """Builds an AnomalyContext using metadata as of `window_end` (not "now")
-    and invokes the LLM graph. `explainer`/`feature_row` come from
-    explain/shap_explainer.py's existing contract - callers own fitting the
-    model and building the SHAP explainer, since that's shared setup across
-    potentially many anomalies in one run.
+    and invokes the LLM graph. `top_features` comes from the inference
+    service (api/inference_client.py) - this function never touches the
+    model itself, callers own getting a SHAP attribution first.
     """
     logger.info("Explaining %s @ %s (score=%.4f)", ticker, window_end, anomaly_score)
-    top_features = top_features_for_anomaly(explainer, feature_row, k=top_k_features)
     sector_industry = get_sector_industry_as_of(ticker, window_end)
     rating = get_rating_consensus_as_of(ticker, window_end)
 
@@ -80,43 +70,38 @@ def explain_anomaly_at(
     top_k_features: int = 5,
     news_count: int = 5,
 ) -> dict[str, Any]:
-    """Dashboard entrypoint: explain one specific (ticker, window_end) point,
-    regardless of which AnomalyDetector originally flagged it on the chart -
-    SHAP explanation always goes through MLAnomalyDetector + TreeExplainer,
-    the only strategy with a SHAP-compatible model.
+    """Dashboard entrypoint: explain one specific (ticker, window_end) point
+    the user clicked. Scores the whole current matrix via the inference
+    service (same call detect_anomalies() makes) and picks out that row -
+    it must be one the current model actually flags as anomalous, since
+    that's the only case the inference service computes a SHAP attribution
+    for (and the only case the dashboard ever offers a click target for).
     """
     feature_matrix = build_feature_matrix()
-    detector, trained_at = resolve_ml_detector(feature_matrix)
-    if trained_at is not None:
-        max_age_days = get_settings().model_stale_after_days
-        if is_model_stale(trained_at, max_age_days):
-            logger.warning(
-                "Model trained at %s is stale (> %d days old) - run "
-                "train_model.sh to refresh it",
-                trained_at,
-                max_age_days,
-            )
-    scored = detector.score(feature_matrix)
+    result = inference_client.score(feature_matrix, top_k_features=top_k_features)
 
-    matching = scored.filter(
+    matching = result.scored_matrix.filter(
         (pl.col("ticker") == ticker) & (pl.col("window_end") == window_end)
     )
     if matching.is_empty():
         logger.warning("No feature row found for %s at %s", ticker, window_end)
         raise ValueError(f"No feature row found for {ticker} at {window_end}")
 
-    background = to_feature_array(feature_matrix)
-    feature_row = to_feature_array(matching)
-    explainer = get_explainer(detector.model, background)
-    anomaly_score = matching.row(0, named=True)["anomaly_score"]
+    key = (ticker, window_end)
+    if key not in result.top_features_by_key:
+        logger.warning(
+            "%s at %s isn't flagged anomalous by the current model - nothing to explain",
+            ticker,
+            window_end,
+        )
+        raise ValueError(f"{ticker} at {window_end} is not currently flagged as an anomaly")
 
+    anomaly_score = matching.row(0, named=True)["anomaly_score"]
     return explain_anomaly(
         ticker=ticker,
         window_end=window_end,
         anomaly_score=anomaly_score,
-        explainer=explainer,
-        feature_row=feature_row,
-        top_k_features=top_k_features,
+        top_features=result.top_features_by_key[key],
         news_count=news_count,
     )
 

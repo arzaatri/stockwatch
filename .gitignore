@@ -23,3 +23,6 @@ models/
 
 TODO.txt
 NOTES.txt
+
+.pytest_cache
+.claude

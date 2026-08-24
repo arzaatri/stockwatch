@@ -2,21 +2,12 @@
 (windowed_price_stats, produced by the Flink job) with slow-changing
 dimension/CDC context into a numeric feature matrix for anomaly detection.
 
-Only FEATURE_COLUMNS is used as the numeric matrix passed to IsolationForest/
-SHAP (detection.py does the polars -> numpy conversion). `sector`/`industry`
-are kept alongside as metadata for the LLM explanation step, not fed to the
-model - a categorical field with the plan's 20-ticker scale isn't worth the
+Only FEATURE_COLUMNS (detection/feature_schema.py) is used as the numeric
+matrix passed to the inference service (which does the polars -> numpy
+conversion and IsolationForest/SHAP work). `sector`/`industry` are kept
+alongside as metadata for the LLM explanation step, not fed to the model -
+a categorical field with the plan's 20-ticker scale isn't worth the
 one-hot-encoding complexity yet.
-
-Deliberately excluded from FEATURE_COLUMNS: raw `avg_price`/`total_volume`.
-Both are on absolute scales that vary by orders of magnitude across tickers
-(a $5 stock vs. a $500 stock; a thinly-traded name vs. a heavily-traded one),
-so a model shared across the whole watchlist would partly learn "which
-ticker is this" rather than "is this unusual for its own history." Both
-stay as matrix columns (the dashboard charts `avg_price` directly) but are
-fed to the model only via their ticker-relative forms - `price_zscore` and
-`volume_zscore`, both computed via the same per-ticker Welford running stats
-(streaming/rolling_stats.py) that also drive `volatility_estimate`.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -35,19 +26,9 @@ from stockwatch.db.models import (
     RawSplit,
     WindowedPriceStats,
 )
+from stockwatch.detection.feature_schema import FEATURE_COLUMNS
 from stockwatch.universe.watchlist import get_active_tickers
 
-FEATURE_COLUMNS = [
-    "volatility_estimate",
-    "price_zscore",
-    "volume_zscore",
-    "rating_buy_ratio",
-    "rating_sell_ratio",
-    "split_recent_flag",
-    "news_count_recent",
-    "earnings_near_flag",
-    "earnings_estimate_shifted_flag",
-]
 METADATA_COLUMNS = ["ticker", "window_end", "sector", "industry"]
 
 NEWS_LOOKBACK_DAYS = 7

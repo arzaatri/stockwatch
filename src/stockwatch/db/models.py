@@ -5,6 +5,7 @@ CDC/SCD2 behavior lives in db/scd2.py and the ingestion/* callers.
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -145,6 +146,27 @@ class DimRatingConsensus(Base):
         DateTime(timezone=True), nullable=True
     )
     is_current: Mapped[bool] = mapped_column(Boolean)
+
+
+class ExplanationJob(Base):
+    """Async 'explain this anomaly' job, polled via GET /explain/{job_id}
+    (api/routers/explain.py). Backed by Postgres rather than an in-memory
+    dict specifically so polling works regardless of which api replica a
+    request lands on - see api/jobs.py.
+    """
+
+    __tablename__ = "explanation_jobs"
+
+    job_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    ticker: Mapped[str] = mapped_column(Text)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text)  # pending | running | done | error
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class DimEarningsEstimate(Base):

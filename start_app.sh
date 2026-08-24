@@ -36,13 +36,20 @@ fi
 uv run stockwatch backfill --max-lookback-days 7
 
 cleanup() {
-  echo "Stopping streaming processes..."
-  kill "${STREAM_PID:-}" "${DASHBOARD_PID:-}" 2>/dev/null || true
+  echo "Stopping streaming/serving processes..."
+  kill "${STREAM_PID:-}" "${INFERENCE_PID:-}" "${API_PID:-}" "${DASHBOARD_PID:-}" \
+    2>/dev/null || true
 }
 trap cleanup EXIT
 
 uv run stockwatch stream &
 STREAM_PID=$!
+
+uv run stockwatch serve-inference &
+INFERENCE_PID=$!
+
+uv run stockwatch serve &
+API_PID=$!
 
 uv run stockwatch dashboard &
 DASHBOARD_PID=$!

@@ -58,16 +58,29 @@ def latest_model_path() -> Path | None:
     return candidates[-1] if candidates else None
 
 
+def load_latest_model_payload() -> dict | None:
+    """The raw joblib payload `save_model` wrote (model, random_state,
+    contamination, trained_at, n_rows, plus reference_distribution once
+    monitoring/drift.py starts populating it) - the one place anything that
+    needs more than just a ready-to-score detector (e.g. the inference
+    service's /model/current, drift reporting) should read from. None if
+    train_model.sh has never been run.
+    """
+    path = latest_model_path()
+    if path is None:
+        return None
+    return joblib.load(path)
+
+
 def load_latest_detector() -> tuple[MLAnomalyDetector, datetime] | None:
     """The most recently trained+saved model, ready to `.score()` (already
     "fit" - no need to call `.fit()` again). None if train_model.sh has never
     been run.
     """
-    path = latest_model_path()
-    if path is None:
+    payload = load_latest_model_payload()
+    if payload is None:
         return None
 
-    payload = joblib.load(path)
     detector = MLAnomalyDetector(
         random_state=payload["random_state"], contamination=payload["contamination"]
     )

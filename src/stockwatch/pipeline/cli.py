@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import click
+import uvicorn
 
 from stockwatch.config import get_settings
 from stockwatch.logging_utils import get_logger
@@ -159,6 +160,34 @@ def dashboard() -> None:
     subprocess.run(
         [sys.executable, "-m", "streamlit", "run", str(DASHBOARD_APP_PATH)], check=True
     )
+
+
+@cli.command(name="serve-inference")
+@click.option("--host", default=None)
+@click.option("--port", default=None, type=int)
+def serve_inference(host: str | None, port: int | None) -> None:
+    """Launch the isolation-forest microservice (inference_service/)."""
+    settings = get_settings()
+    resolved_host = host or settings.inference_host
+    resolved_port = port or settings.inference_port
+    logger.info("stockwatch serve-inference on %s:%d", resolved_host, resolved_port)
+    uvicorn.run(
+        "stockwatch.inference_service.app:app", host=resolved_host, port=resolved_port
+    )
+
+
+@cli.command()
+@click.option("--host", default=None)
+@click.option("--port", default=None, type=int)
+def serve(host: str | None, port: int | None) -> None:
+    """Launch the orchestration api service (api/) - Postgres, news/ratings,
+    the LLM, job tracking; calls the inference microservice over HTTP.
+    """
+    settings = get_settings()
+    resolved_host = host or settings.api_host
+    resolved_port = port or settings.api_port
+    logger.info("stockwatch serve on %s:%d", resolved_host, resolved_port)
+    uvicorn.run("stockwatch.api.app:app", host=resolved_host, port=resolved_port)
 
 
 def main() -> None:

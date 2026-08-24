@@ -30,6 +30,7 @@ _TABLES = [
     "dim_index_membership",
     "dim_rating_consensus",
     "dim_earnings_estimate",
+    "explanation_jobs",
 ]
 
 

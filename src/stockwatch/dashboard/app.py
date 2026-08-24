@@ -10,10 +10,12 @@ from datetime import UTC, datetime, timedelta
 
 import plotly.graph_objects as go
 import polars as pl
+import requests
 import streamlit as st
 
+from stockwatch.api import inference_client
 from stockwatch.config import get_settings
-from stockwatch.detection.model_store import is_model_stale, resolve_ml_detector
+from stockwatch.detection.model_store import is_model_stale
 from stockwatch.detection.simple_detector import SimpleAnomalyDetector
 from stockwatch.features.build_features import build_feature_matrix
 from stockwatch.logging_utils import get_logger
@@ -50,22 +52,31 @@ def _load_scored_matrix(
     if matrix.is_empty():
         return matrix, None
 
+    if detector_label == ML_LABEL:
+        # ML scoring goes through the inference microservice, not an
+        # in-process model load - a RequestException here covers both "not
+        # enough rows for the service's ad-hoc fallback fit" (422) and "the
+        # service is unreachable", either of which just means no ML score
+        # for this selection yet.
+        try:
+            result = inference_client.score(matrix)
+        except requests.RequestException:
+            logger.exception("Inference service call failed while scoring for the dashboard")
+            return matrix.clear(), None
+        return result.scored_matrix, result.model_trained_at
+
     try:
-        if detector_label == ML_LABEL:
-            detector, trained_at = resolve_ml_detector(matrix)
-        else:
-            detector, trained_at = SimpleAnomalyDetector(), None
-            detector.fit(matrix)
+        detector = SimpleAnomalyDetector()
+        detector.fit(matrix)
     except ValueError:
-        # e.g. IsolationForest needs a minimum number of rows to fit
-        # meaningfully - not enough history yet for this ticker/lookback.
+        # e.g. not enough history yet for this ticker/lookback.
         logger.info(
             "Not enough rows (%d) to fit %s for this selection",
             matrix.height,
             detector_label,
         )
         return matrix.clear(), None
-    return detector.score(matrix), trained_at
+    return detector.score(matrix), None
 
 
 @st.cache_data

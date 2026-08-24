@@ -81,6 +81,22 @@ CREATE TABLE windowed_price_stats (
 CREATE INDEX ix_windowed_price_stats_ticker_window ON windowed_price_stats (ticker, window_end);
 
 -- ---------------------------------------------------------------------------
+-- Async "explain this anomaly" job tracking (api/jobs.py). Postgres-backed
+-- rather than in-memory so polling GET /explain/{job_id} works regardless of
+-- which api replica a request lands on.
+-- ---------------------------------------------------------------------------
+CREATE TABLE explanation_jobs (
+    job_id       TEXT PRIMARY KEY,
+    ticker       TEXT NOT NULL,
+    window_end   TIMESTAMPTZ NOT NULL,
+    status       TEXT NOT NULL,   -- 'pending' | 'running' | 'done' | 'error'
+    result       JSON,
+    error        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ
+);
+
+-- ---------------------------------------------------------------------------
 -- SCD2 dimension tables. Each has valid_from/valid_to/is_current, and a
 -- partial unique index enforcing "at most one current row per natural key" -
 -- the invariant db/scd2.py's generic upsert function must never violate.

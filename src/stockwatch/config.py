@@ -26,6 +26,13 @@ class Settings(BaseSettings):
 
     model_stale_after_days: int = 7
 
+    inference_service_url: str = "http://localhost:8001"
+    inference_host: str = "0.0.0.0"
+    inference_port: int = 8001
+
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+
     @property
     def postgres_dsn(self) -> str:
         return (
