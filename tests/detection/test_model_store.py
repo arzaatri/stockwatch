@@ -7,6 +7,7 @@ import pytest
 from stockwatch.detection import model_store
 from stockwatch.detection.ml_detector import MLAnomalyDetector
 from stockwatch.features.build_features import FEATURE_COLUMNS
+from stockwatch.monitoring.drift import SCORE_DISTRIBUTION_KEY
 
 
 def _synthetic_matrix(n: int = 60, seed: int = 0) -> pl.DataFrame:
@@ -33,14 +34,15 @@ def test_save_raises_if_detector_not_fit() -> None:
     detector = MLAnomalyDetector()
 
     with pytest.raises(RuntimeError):
-        model_store.save_model(detector, n_rows=0)
+        model_store.save_model(detector, _synthetic_matrix())
 
 
 def test_save_and_load_round_trips_the_model() -> None:
     detector = MLAnomalyDetector(random_state=42, contamination=0.1)
-    detector.fit(_synthetic_matrix())
+    matrix = _synthetic_matrix()
+    detector.fit(matrix)
 
-    path = model_store.save_model(detector, n_rows=60)
+    path = model_store.save_model(detector, matrix)
 
     assert path.exists()
     loaded = model_store.load_latest_detector()
@@ -52,12 +54,30 @@ def test_save_and_load_round_trips_the_model() -> None:
     assert (datetime.now(UTC) - trained_at).total_seconds() < 5
 
 
+def test_save_computes_a_reference_distribution_for_every_feature_and_the_score() -> None:
+    detector = MLAnomalyDetector(random_state=0)
+    matrix = _synthetic_matrix(n=60)
+    detector.fit(matrix)
+
+    model_store.save_model(detector, matrix)
+
+    payload = model_store.load_latest_model_payload()
+    assert payload is not None
+    reference_distribution = payload["reference_distribution"]
+    for column in [*FEATURE_COLUMNS, SCORE_DISTRIBUTION_KEY]:
+        assert column in reference_distribution
+        bin_proportions = reference_distribution[column]["bin_proportions"]
+        assert len(reference_distribution[column]["bin_edges"]) == len(bin_proportions) + 1
+        assert sum(bin_proportions) == pytest.approx(1.0)
+
+
 def test_latest_model_path_picks_the_most_recently_saved() -> None:
     detector = MLAnomalyDetector()
-    detector.fit(_synthetic_matrix())
+    matrix = _synthetic_matrix()
+    detector.fit(matrix)
 
-    first_path = model_store.save_model(detector, n_rows=60)
-    second_path = model_store.save_model(detector, n_rows=60)
+    first_path = model_store.save_model(detector, matrix)
+    second_path = model_store.save_model(detector, matrix)
 
     assert first_path != second_path
     assert model_store.latest_model_path() == second_path
@@ -84,8 +104,9 @@ def test_resolve_ml_detector_falls_back_to_an_ad_hoc_fit_when_nothing_saved() ->
 
 def test_resolve_ml_detector_prefers_the_saved_model() -> None:
     saved_detector = MLAnomalyDetector(random_state=99)
-    saved_detector.fit(_synthetic_matrix())
-    model_store.save_model(saved_detector, n_rows=60)
+    matrix = _synthetic_matrix()
+    saved_detector.fit(matrix)
+    model_store.save_model(saved_detector, matrix)
 
     detector, trained_at = model_store.resolve_ml_detector(_synthetic_matrix())
 

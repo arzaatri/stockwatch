@@ -10,8 +10,10 @@ from pathlib import Path
 import joblib
 import polars as pl
 
+from stockwatch.detection.isolation_forest import to_feature_array
 from stockwatch.detection.ml_detector import MLAnomalyDetector
 from stockwatch.logging_utils import get_logger
+from stockwatch.monitoring.drift import build_reference_distribution
 
 logger = get_logger(__name__)
 
@@ -23,15 +25,19 @@ _FILENAME_TIME_FORMAT = "%Y%m%dT%H%M%S%fZ"  # microsecond precision - sorts
 # runs that happen to fall within the same second (e.g. in tests).
 
 
-def save_model(detector: MLAnomalyDetector, n_rows: int) -> Path:
+def save_model(detector: MLAnomalyDetector, feature_matrix: pl.DataFrame) -> Path:
     """Persists `detector.model` plus enough metadata (contamination,
-    random_state, when, how many rows it was trained on) to reload it as an
-    equivalent MLAnomalyDetector later via `load_latest_detector`.
+    random_state, when, how many rows it was trained on, and a reference
+    distribution for drift monitoring - see monitoring/drift.py) to reload
+    it as an equivalent MLAnomalyDetector later via `load_latest_detector`.
+    `feature_matrix` must be the exact batch `detector` was just fit on -
+    that's what makes the reference distribution meaningful.
     """
     if detector.model is None:
         raise RuntimeError("Cannot save an unfit MLAnomalyDetector - call .fit() first")
 
     trained_at = datetime.now(UTC)
+    scores = detector.model.decision_function(to_feature_array(feature_matrix))
     MODELS_DIR.mkdir(exist_ok=True)
     path = (
         MODELS_DIR
@@ -43,11 +49,12 @@ def save_model(detector: MLAnomalyDetector, n_rows: int) -> Path:
             "random_state": detector.random_state,
             "contamination": detector.contamination,
             "trained_at": trained_at,
-            "n_rows": n_rows,
+            "n_rows": feature_matrix.height,
+            "reference_distribution": build_reference_distribution(feature_matrix, scores),
         },
         path,
     )
-    logger.info("Saved trained model to %s (%d rows)", path, n_rows)
+    logger.info("Saved trained model to %s (%d rows)", path, feature_matrix.height)
     return path
 
 
@@ -60,11 +67,10 @@ def latest_model_path() -> Path | None:
 
 def load_latest_model_payload() -> dict | None:
     """The raw joblib payload `save_model` wrote (model, random_state,
-    contamination, trained_at, n_rows, plus reference_distribution once
-    monitoring/drift.py starts populating it) - the one place anything that
-    needs more than just a ready-to-score detector (e.g. the inference
-    service's /model/current, drift reporting) should read from. None if
-    train_model.sh has never been run.
+    contamination, trained_at, n_rows, reference_distribution) - the one
+    place anything that needs more than just a ready-to-score detector (e.g.
+    the inference service's /model/current, drift reporting) should read
+    from. None if train_model.sh has never been run.
     """
     path = latest_model_path()
     if path is None:

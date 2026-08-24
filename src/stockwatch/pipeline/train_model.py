@@ -33,4 +33,4 @@ def train_and_save_model(
     )
     detector = MLAnomalyDetector(random_state=random_state, contamination=contamination)
     detector.fit(feature_matrix)
-    return save_model(detector, n_rows=feature_matrix.height)
+    return save_model(detector, feature_matrix)

@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # Drift monitoring (monitoring/drift.py) - kept small since this project's
+    # data volumes are small; PSI severity thresholds are the standard
+    # industry rule of thumb, not tuned for this project's data specifically.
+    drift_reference_bins: int = 5
+    drift_psi_moderate_threshold: float = 0.1
+    drift_psi_significant_threshold: float = 0.25
+
     @property
     def postgres_dsn(self) -> str:
         return (

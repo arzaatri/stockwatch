@@ -14,8 +14,11 @@ from sqlalchemy.orm import Session
 from stockwatch.api import inference_client
 from stockwatch.api.app import app
 from stockwatch.db.models import Watchlist, WindowedPriceStats
+from stockwatch.detection.feature_schema import FEATURE_COLUMNS
 from stockwatch.explain.shap_explainer import FeatureAttribution
+from stockwatch.inference_service.schemas import ModelStatus
 from stockwatch.llm.schemas import ExplanationOutput, GraphState
+from stockwatch.monitoring.drift import build_reference_distribution
 from stockwatch.pipeline import explain_anomaly as explain_anomaly_module
 
 client = TestClient(app)
@@ -145,3 +148,46 @@ def test_explain_job_completes_and_can_be_polled(
 def test_explain_unknown_job_returns_404() -> None:
     response = client.get("/explain/does-not-exist")
     assert response.status_code == 404
+
+
+def _fake_reference_distribution() -> dict:
+    rng = np.random.default_rng(0)
+    matrix = pl.DataFrame(
+        {column: rng.normal(size=30).tolist() for column in FEATURE_COLUMNS}
+    )
+    return build_reference_distribution(matrix, rng.normal(size=30))
+
+
+def test_drift_returns_409_when_no_reference_distribution(monkeypatch) -> None:
+    monkeypatch.setattr(
+        inference_client,
+        "get_model_status",
+        lambda: ModelStatus(trained_at=None, is_stale=False),
+    )
+
+    response = client.get("/monitoring/drift")
+
+    assert response.status_code == 409
+
+
+def test_drift_returns_a_report_when_a_reference_distribution_exists(
+    monkeypatch, db_session: Session
+) -> None:
+    _seed_price_history(db_session, "AAPL", n=15)
+    monkeypatch.setattr(inference_client, "score", _fake_score)
+    monkeypatch.setattr(
+        inference_client,
+        "get_model_status",
+        lambda: ModelStatus(
+            trained_at=datetime.now(UTC),
+            is_stale=False,
+            reference_distribution=_fake_reference_distribution(),
+        ),
+    )
+
+    response = client.get("/monitoring/drift")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["n_rows_evaluated"] == 15
+    assert len(body["feature_drift"]) == len(FEATURE_COLUMNS)

@@ -53,14 +53,16 @@ def test_model_current_with_no_saved_model() -> None:
 
 def test_model_current_reflects_saved_model() -> None:
     detector = MLAnomalyDetector(random_state=1, contamination=0.1)
-    detector.fit(_synthetic_matrix(30))
-    model_store.save_model(detector, n_rows=30)
+    matrix = _synthetic_matrix(30)
+    detector.fit(matrix)
+    model_store.save_model(detector, matrix)
 
     response = client.get("/model/current")
     body = response.json()
     assert body["trained_at"] is not None
     assert body["n_rows"] == 30
     assert body["contamination"] == 0.1
+    assert body["reference_distribution"] is not None
 
 
 def test_score_returns_one_row_per_request_row() -> None:
@@ -76,8 +78,9 @@ def test_score_only_computes_shap_for_flagged_anomalies() -> None:
     # rows get flagged, so both branches of the SHAP-only-for-anomalies
     # logic are actually exercised, deterministically.
     detector = MLAnomalyDetector(random_state=0, contamination=0.5)
-    detector.fit(_synthetic_matrix(40))
-    model_store.save_model(detector, n_rows=40)
+    matrix = _synthetic_matrix(40)
+    detector.fit(matrix)
+    model_store.save_model(detector, matrix)
 
     response = client.post(
         "/score", json={"rows": _synthetic_rows(40, seed=1), "top_k_features": 3}

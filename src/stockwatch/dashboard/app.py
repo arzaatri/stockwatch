@@ -19,6 +19,7 @@ from stockwatch.detection.model_store import is_model_stale
 from stockwatch.detection.simple_detector import SimpleAnomalyDetector
 from stockwatch.features.build_features import build_feature_matrix
 from stockwatch.logging_utils import get_logger
+from stockwatch.monitoring.drift import build_drift_report
 from stockwatch.pipeline.explain_anomaly import explain_anomaly_at
 from stockwatch.universe.watchlist import get_active_tickers
 
@@ -82,6 +83,44 @@ def _load_scored_matrix(
 @st.cache_data
 def _cached_explanation(ticker: str, window_end: datetime) -> dict:
     return explain_anomaly_at(ticker, window_end)
+
+
+def _render_model_health(scored: pl.DataFrame, trained_at: datetime) -> None:
+    """PSI drift of the current selection against the training-time
+    reference distribution (monitoring/drift.py). Skipped for an ad-hoc,
+    unpersisted fit (no reference distribution exists yet) - callers only
+    invoke this when `trained_at is not None`.
+    """
+    try:
+        status = inference_client.get_model_status()
+    except requests.RequestException:
+        logger.exception("Inference service call failed while fetching model health")
+        return
+    if status.reference_distribution is None:
+        return
+
+    report = build_drift_report(scored, status.reference_distribution, trained_at)
+    with st.expander("Model health (drift vs. training data)"):
+        st.caption(
+            f"Observed anomaly rate on this selection: {report.observed_anomaly_rate:.1%}"
+        )
+        st.dataframe(
+            [
+                {"feature": fd.feature, "psi": round(fd.psi, 4), "severity": fd.severity}
+                for fd in [*report.feature_drift, report.score_drift]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        significant = [
+            fd.feature
+            for fd in [*report.feature_drift, report.score_drift]
+            if fd.severity == "significant"
+        ]
+        if significant:
+            st.warning(
+                f"Significant drift on: {', '.join(significant)} - consider retraining."
+            )
 
 
 def _build_chart(ticker: str, ticker_rows: pl.DataFrame) -> go.Figure:
@@ -212,6 +251,7 @@ def main() -> None:
                 )
             else:
                 st.caption(f"Model trained {trained_at.isoformat()} ({age_days}d ago)")
+            _render_model_health(scored, trained_at)
 
     for ticker in selected:
         ticker_rows = scored.filter(pl.col("ticker") == ticker).sort("window_end")
